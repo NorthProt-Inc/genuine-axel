@@ -1,0 +1,23 @@
+fastapi
+uvicorn
+pydantic
+google-genai
+requests
+chromadb
+python-multipart
+aiofiles
+Pillow
+aiohttp
+python-dotenv
+openai
+tavily-python
+filelock
+pytz
+pymupdf
+mcp>=1.0.0
+sse-starlette>=2.0.0
+# Research MCP dependencies
+playwright>=1.40.0
+markdownify>=0.12.1
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
