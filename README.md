@@ -3,7 +3,7 @@
 > **"Not just an Assistant, but a Co-Founder."**
 > An autonomous AI agent system built for high-context interaction, memory persistence, and hardware control.
 
-**Environment:** Pop!_OS (Ubuntu 24.04 LTS) + Systemd
+**Environment:** Ubuntu 24.04 + Systemd
 
 ---
 
