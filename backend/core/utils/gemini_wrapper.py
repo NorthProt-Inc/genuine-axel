@@ -393,24 +393,56 @@ class GenerateContentResponseWrapper:
 
                 is_thought = False
                 text_chunk = ""
-                function_call = None
+                function_calls = []  # Support multiple function calls per chunk
 
-                if hasattr(chunk, 'candidates') and chunk.candidates:
-                    for part in chunk.candidates[0].content.parts:
-                        if hasattr(part, 'thought') and part.thought:
-                            is_thought = True
-                        if part.text:
-                            text_chunk += part.text
+                try:
+                    if hasattr(chunk, 'candidates') and chunk.candidates:
+                        candidate = chunk.candidates[0]
+                        if hasattr(candidate, 'content') and candidate.content:
+                            parts = candidate.content.parts if hasattr(candidate.content, 'parts') else []
+                            for part in parts:
+                                # Check for thought marker
+                                if hasattr(part, 'thought') and part.thought:
+                                    is_thought = True
 
-                        if hasattr(part, 'function_call') and part.function_call:
-                            function_call = {
-                                "name": part.function_call.name,
-                                "args": dict(part.function_call.args) if part.function_call.args else {}
-                            }
-                elif hasattr(chunk, 'text') and chunk.text:
-                    text_chunk = chunk.text
+                                # Extract text content
+                                if hasattr(part, 'text') and part.text:
+                                    text_chunk += part.text
 
-                if text_chunk or function_call:
+                                # Extract function call (critical for tool execution)
+                                if hasattr(part, 'function_call') and part.function_call:
+                                    fc = part.function_call
+                                    if fc.name:  # Valid function call must have a name
+                                        function_calls.append({
+                                            "name": fc.name,
+                                            "args": dict(fc.args) if fc.args else {}
+                                        })
+                                        _logger.debug("Function call detected",
+                                                     name=fc.name,
+                                                     args_count=len(fc.args) if fc.args else 0)
+
+                    elif hasattr(chunk, 'text') and chunk.text:
+                        text_chunk = chunk.text
+
+                except Exception as e:
+                    _logger.warning("Chunk parsing error", error=str(e)[:100])
+                    # Continue processing even if one chunk fails
+                    continue
+
+                # Yield each function call as a separate wrapper
+                for fc in function_calls:
+                    wrapper = GenerateContentResponseWrapper.__new__(GenerateContentResponseWrapper)
+                    wrapper._response = chunk
+                    wrapper._stream = False
+                    wrapper._text = ""  # Function call chunks don't have text
+                    wrapper._thought_text = ""
+                    wrapper._chunks = []
+                    wrapper._is_thought = False
+                    wrapper._function_call = fc
+                    yield wrapper
+
+                # Yield text content if present (and no function call in this chunk)
+                if text_chunk and not function_calls:
                     self._chunks.append(text_chunk)
                     wrapper = GenerateContentResponseWrapper.__new__(GenerateContentResponseWrapper)
                     wrapper._response = chunk
@@ -419,12 +451,12 @@ class GenerateContentResponseWrapper:
                     wrapper._thought_text = ""
                     wrapper._chunks = []
                     wrapper._is_thought = is_thought
-                    wrapper._function_call = function_call
+                    wrapper._function_call = None
                     yield wrapper
         else:
             yield self
 
     @property
     def function_call(self):
-
+        """Return the function call if present, or None."""
         return getattr(self, '_function_call', None)

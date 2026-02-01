@@ -79,7 +79,7 @@ class WakewordDetector:
 
                 for model_name, score in prediction.items():
                     if score > self.sensitivity:
-                        _log.info("wakeword det!", mdl=model_name, score=f"{score:.4f}")
+                        _log.info("wakeword det!", mdl=model_name, score=round(score, 4))
                         yield True
 
             except KeyboardInterrupt:

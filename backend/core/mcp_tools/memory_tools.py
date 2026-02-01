@@ -91,7 +91,7 @@ async def add_memory(arguments: dict[str, Any]) -> Sequence[TextContent]:
 
     valid_categories = ["observation", "fact", "code"]
     if category not in valid_categories:
-        _log.warning("TOOL fail", fn="add_memory", err=f"invalid category: {category}")
+        _log.warning("TOOL fail", fn="add_memory", err="invalid category", category=category)
         return [TextContent(
             type="text",
             text=f"Error: invalid category '{category}'. Must be one of: {', '.join(valid_categories)}"
@@ -169,7 +169,7 @@ async def store_memory(arguments: dict[str, Any]) -> Sequence[TextContent]:
 
     valid_categories = ["fact", "preference", "conversation", "insight"]
     if category not in valid_categories:
-        _log.warning("TOOL fail", fn="store_memory", err=f"invalid category: {category}")
+        _log.warning("TOOL fail", fn="store_memory", err="invalid category", category=category)
         return [TextContent(
             type="text",
             text=f"Error: invalid category '{category}'. Must be one of: {', '.join(valid_categories)}"
@@ -314,3 +314,90 @@ async def get_recent_logs(arguments: dict[str, Any]) -> Sequence[TextContent]:
     except Exception as e:
         _log.error("TOOL fail", fn="get_recent_logs", err=str(e)[:100])
         return [TextContent(type="text", text=f"✗ Logs Error: {str(e)}")]
+
+
+@register_tool(
+    "memory_stats",
+    category="memory",
+    description="""Get detailed memory system statistics.
+
+Returns:
+- Working memory: message count, size
+- Long-term memory: document count, embedding stats
+- Graph memory: entity and relationship counts
+- Cache statistics""",
+    input_schema={
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+)
+async def memory_stats(arguments: dict[str, Any]) -> Sequence[TextContent]:
+
+    _log.debug("TOOL invoke", fn="memory_stats")
+
+    try:
+        output = ["✓ Memory System Statistics", "═" * 40, ""]
+
+        # Working Memory stats
+        try:
+            if WORKING_MEMORY_PATH.exists():
+                data = json.loads(WORKING_MEMORY_PATH.read_text())
+                messages = data.get("messages", [])
+                size_kb = WORKING_MEMORY_PATH.stat().st_size / 1024
+                output.append("Working Memory:")
+                output.append(f"  Messages: {len(messages)}")
+                output.append(f"  File Size: {size_kb:.1f} KB")
+            else:
+                output.append("Working Memory: Not initialized")
+        except Exception as e:
+            output.append(f"Working Memory: Error - {str(e)[:50]}")
+
+        output.append("")
+
+        # Long-term Memory stats
+        try:
+            from backend.memory.permanent import LongTermMemory
+            ltm = LongTermMemory()
+            ltm_stats = ltm.get_stats()
+            output.append("Long-term Memory (ChromaDB):")
+            output.append(f"  Documents: {ltm_stats.get('total_documents', 'N/A')}")
+            output.append(f"  Categories: {ltm_stats.get('categories', {})}")
+            output.append(f"  Embedding Cache: {ltm_stats.get('embedding_cache_size', 0)} entries")
+        except Exception as e:
+            output.append(f"Long-term Memory: Error - {str(e)[:50]}")
+
+        output.append("")
+
+        # GraphRAG stats
+        try:
+            from backend.memory.graph_rag import GraphRAG
+            graph = GraphRAG()
+            graph_stats = graph.get_stats()
+            output.append("Knowledge Graph:")
+            output.append(f"  Entities: {graph_stats.get('entity_count', 0)}")
+            output.append(f"  Relationships: {graph_stats.get('relationship_count', 0)}")
+        except Exception as e:
+            output.append(f"Knowledge Graph: Error - {str(e)[:50]}")
+
+        output.append("")
+
+        # Cache stats
+        try:
+            from backend.core.utils import get_all_cache_stats
+            caches = get_all_cache_stats()
+            if caches:
+                output.append("Caches:")
+                for name, stats in caches.items():
+                    output.append(f"  {name}: {stats['size']}/{stats['maxsize']} (hit rate: {stats['hit_rate']})")
+            else:
+                output.append("Caches: None configured")
+        except Exception as e:
+            output.append(f"Caches: Error - {str(e)[:50]}")
+
+        _log.info("TOOL ok", fn="memory_stats")
+        return [TextContent(type="text", text="\n".join(output))]
+
+    except Exception as e:
+        _log.error("TOOL fail", fn="memory_stats", err=str(e)[:100])
+        return [TextContent(type="text", text=f"✗ Stats Error: {str(e)}")]

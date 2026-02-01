@@ -360,29 +360,17 @@ async def call_tool(name: str, arguments: dict) -> Sequence[types.TextContent]:
 
             output_parts = []
 
-            if included_files:
-                output_parts.append(f"## Context Files Included ({len(included_files)})")
-                for f in included_files:
-                    output_parts.append(f"- {f}")
-                output_parts.append("")
-
             if context_errors:
-                output_parts.append("## Context Warnings")
                 for err in context_errors:
-                    output_parts.append(f"- {err}")
+                    output_parts.append(f"⚠ {err}")
                 output_parts.append("")
 
             if result.success:
-                output_parts.append("## Opus Response")
                 output_parts.append(result.output)
             else:
-                output_parts.append("## Error")
-                output_parts.append(result.error or "Unknown error")
+                output_parts.append(f"Error: {result.error or 'Unknown error'}")
                 if result.output:
-                    output_parts.append("\n## Partial Output")
-                    output_parts.append(result.output)
-
-            output_parts.append(f"\n---\n*Execution time: {result.execution_time:.2f}s | Exit code: {result.exit_code}*")
+                    output_parts.append(f"\nPartial output:\n{result.output}")
 
             return [TextContent(type="text", text="\n".join(output_parts))]
 
@@ -400,33 +388,25 @@ async def call_tool(name: str, arguments: dict) -> Sequence[types.TextContent]:
                     version = _safe_decode(result.stdout).strip()
                     return [TextContent(
                         type="text",
-                        text=f"## Opus Bridge Status: Healthy\n\n"
-                             f"**Claude CLI Version:** {version}\n"
-                             f"**Default Model:** {DEFAULT_MODEL}\n"
-                             f"**Timeout:** {COMMAND_TIMEOUT}s\n"
-                             f"**Max Context:** {MAX_TOTAL_CONTEXT // 1024}KB\n"
-                             f"**Working Directory:** {AXEL_ROOT}"
+                        text=f"Healthy - Claude CLI {version}, model={DEFAULT_MODEL}"
                     )]
                 else:
                     stderr = _safe_decode(result.stderr)
                     return [TextContent(
                         type="text",
-                        text=f"## Opus Bridge Status: Error\n\n"
-                             f"Claude CLI returned error:\n{stderr}"
+                        text=f"Error: {stderr}"
                     )]
 
             except FileNotFoundError:
                 return [TextContent(
                     type="text",
-                    text="## Opus Bridge Status: Not Available\n\n"
-                         "Claude CLI is not installed or not in PATH.\n\n"
-                         "Install with: `npm install -g @anthropic-ai/claude-code`"
+                    text="Not available - Claude CLI not installed"
                 )]
 
             except Exception as e:
                 return [TextContent(
                     type="text",
-                    text=f"## Opus Bridge Status: Error\n\n{str(e)}"
+                    text=f"Error: {str(e)}"
                 )]
 
         else:

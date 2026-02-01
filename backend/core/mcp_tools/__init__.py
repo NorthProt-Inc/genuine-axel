@@ -1,6 +1,10 @@
 import importlib
 import pkgutil
-import logging
+import time
+
+from backend.core.logging.logging import get_logger
+from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Callable, Dict, Any, Sequence, Optional
 from functools import wraps
 from mcp.types import Tool
@@ -13,13 +17,52 @@ __all__ = [
     "get_tool_metadata",
     "is_tool_registered",
     "get_tool_schemas",
+    "get_tool_metrics",
+    "get_all_metrics",
+    "reset_metrics",
 ]
 
-logger = logging.getLogger("axel-mcp-tools")
+_log = get_logger("mcp.tools")
 
 _tool_handlers: Dict[str, Callable] = {}
 
 _tool_metadata: Dict[str, Dict[str, Any]] = {}
+
+
+@dataclass
+class ToolMetrics:
+    """Metrics for a single tool."""
+    call_count: int = 0
+    success_count: int = 0
+    error_count: int = 0
+    total_duration_ms: float = 0.0
+    last_call_at: Optional[float] = None
+    last_error: Optional[str] = None
+    last_error_at: Optional[float] = None
+
+    @property
+    def avg_duration_ms(self) -> float:
+        return self.total_duration_ms / self.call_count if self.call_count > 0 else 0.0
+
+    @property
+    def success_rate(self) -> float:
+        return self.success_count / self.call_count if self.call_count > 0 else 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "call_count": self.call_count,
+            "success_count": self.success_count,
+            "error_count": self.error_count,
+            "avg_duration_ms": round(self.avg_duration_ms, 2),
+            "total_duration_ms": round(self.total_duration_ms, 2),
+            "success_rate": f"{self.success_rate:.1%}",
+            "last_call_at": self.last_call_at,
+            "last_error": self.last_error[:100] if self.last_error else None,
+            "last_error_at": self.last_error_at,
+        }
+
+
+_tool_metrics: Dict[str, ToolMetrics] = defaultdict(ToolMetrics)
 
 def register_tool(
     name: str,
@@ -31,9 +74,8 @@ def register_tool(
 
     def decorator(func: Callable):
         if name in _tool_handlers:
-            logger.warning(f"Tool '{name}' is being re-registered, overwriting previous handler")
+            _log.warning("Tool re-registered, overwriting", tool=name)
 
-        _tool_handlers[name] = func
         _tool_metadata[name] = {
             "category": category,
             "module": func.__module__,
@@ -44,8 +86,25 @@ def register_tool(
 
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            return await func(*args, **kwargs)
+            metrics = _tool_metrics[name]
+            metrics.call_count += 1
+            metrics.last_call_at = time.time()
+            start_time = time.time()
 
+            try:
+                result = await func(*args, **kwargs)
+                metrics.success_count += 1
+                return result
+            except Exception as e:
+                metrics.error_count += 1
+                metrics.last_error = str(e)
+                metrics.last_error_at = time.time()
+                raise
+            finally:
+                elapsed_ms = (time.time() - start_time) * 1000
+                metrics.total_duration_ms += elapsed_ms
+
+        _tool_handlers[name] = wrapper
         return wrapper
     return decorator
 
@@ -81,7 +140,7 @@ def get_tool_schemas() -> list[Tool]:
     for name, meta in _tool_metadata.items():
         if meta.get("input_schema") is None:
 
-            logger.debug(f"Tool '{name}' missing input_schema, skipping schema generation")
+            _log.debug("Tool missing input_schema, skipping", tool=name)
             continue
 
         description = meta.get("description")
@@ -97,6 +156,27 @@ def get_tool_schemas() -> list[Tool]:
 
     return tools
 
+def get_tool_metrics(name: str) -> Optional[Dict[str, Any]]:
+    """Get metrics for a specific tool."""
+    if name not in _tool_metrics:
+        return None
+    return _tool_metrics[name].to_dict()
+
+
+def get_all_metrics() -> Dict[str, Dict[str, Any]]:
+    """Get metrics for all tools."""
+    return {name: metrics.to_dict() for name, metrics in _tool_metrics.items()}
+
+
+def reset_metrics(name: Optional[str] = None) -> None:
+    """Reset metrics for a specific tool or all tools."""
+    if name:
+        if name in _tool_metrics:
+            _tool_metrics[name] = ToolMetrics()
+    else:
+        _tool_metrics.clear()
+
+
 def _load_all_tools():
 
     try:
@@ -107,13 +187,13 @@ def _load_all_tools():
             if not is_pkg and module_name.endswith("_tools"):
                 try:
                     importlib.import_module(f"backend.core.mcp_tools.{module_name}")
-                    logger.debug(f"Loaded tool module: {module_name}")
+                    _log.debug("Loaded tool module", module=module_name)
                 except Exception as e:
-                    logger.error(f"Failed to load tool module '{module_name}': {e}")
+                    _log.error("Failed to load tool module", module=module_name, err=str(e)[:100])
 
-        logger.info(f"Tool registry initialized with {len(_tool_handlers)} tools")
+        _log.info("Tool registry initialized", tool_cnt=len(_tool_handlers))
 
     except Exception as e:
-        logger.warning(f"Auto-loading tools failed (may be normal during initial setup): {e}")
+        _log.warning("Auto-loading tools failed (may be normal during initial setup)", err=str(e)[:100])
 
 _load_all_tools()

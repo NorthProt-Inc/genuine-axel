@@ -6,10 +6,12 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 from contextlib import contextmanager
 from backend.core.logging import get_logger
-from backend.config import SQLITE_MEMORY_PATH
+from backend.config import SQLITE_MEMORY_PATH, MESSAGE_ARCHIVE_AFTER_DAYS, MESSAGE_SUMMARY_MODEL
 from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver
+from backend.core.utils.text_utils import sanitize_memory_text
 
-MESSAGE_EXPIRY_DAYS = 7
+# MESSAGE_ARCHIVE_AFTER_DAYS는 config.py에서 가져옴
+MESSAGE_EXPIRY_DAYS = MESSAGE_ARCHIVE_AFTER_DAYS
 
 _log = get_logger("memory.recent")
 
@@ -68,6 +70,29 @@ class SessionArchive:
             except sqlite3.OperationalError:
                 pass
 
+            # messages 테이블 생성 (메시지 직접 저장용)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT,
+                    turn_id INTEGER,
+                    role TEXT,
+                    content TEXT,
+                    timestamp TIMESTAMP,
+                    emotional_context TEXT
+                )
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_messages_session
+                ON messages(session_id)
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_messages_timestamp
+                ON messages(timestamp DESC)
+            """)
+
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_sessions_expires
                 ON sessions(expires_at)
@@ -116,8 +141,63 @@ class SessionArchive:
                 ON interaction_logs(router_reason)
             """)
 
+            # archived_messages 테이블 - 축약된 원본 메시지 백업용
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS archived_messages (
+                    id INTEGER PRIMARY KEY,
+                    session_id TEXT,
+                    turn_id INTEGER,
+                    role TEXT,
+                    content TEXT,
+                    timestamp TIMESTAMP,
+                    emotional_context TEXT,
+                    archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_archived_session
+                ON archived_messages(session_id)
+            """)
+
             conn.commit()
             _log.debug("Database initialized", db_path=str(self.db_path))
+
+    def save_message_immediate(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        timestamp: str,
+        emotional_context: str = "neutral"
+    ) -> bool:
+        """매 턴 즉시 저장 - 중복 방지 포함"""
+        try:
+            # 텍스트 정제 (이모지, 특수문자 제거)
+            content = sanitize_memory_text(content)
+
+            with self._get_connection() as conn:
+                # 현재 최대 turn_id 조회
+                cursor = conn.execute(
+                    'SELECT MAX(turn_id) FROM messages WHERE session_id = ?',
+                    (session_id,)
+                )
+                row = cursor.fetchone()
+                turn_id = (row[0] or -1) + 1
+
+                conn.execute("""
+                    INSERT OR IGNORE INTO messages
+                    (session_id, turn_id, role, content, timestamp, emotional_context)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (session_id, turn_id, role, content, timestamp, emotional_context))
+
+                conn.commit()
+                _log.debug("MEM msg_saved", session=session_id[:8], turn=turn_id, role=role)
+                return True
+
+        except Exception as e:
+            _log.error("Immediate save failed", error=str(e), session_id=session_id[:8])
+            return False
 
     def save_session(
         self,
@@ -130,61 +210,55 @@ class SessionArchive:
         ended_at: datetime,
         messages: List[Dict] = None
     ) -> bool:
-
+        """세션 저장 - messages는 messages 테이블에 직접 저장"""
         expires_at = datetime.now(VANCOUVER_TZ) + timedelta(days=MESSAGE_EXPIRY_DAYS)
 
         try:
             with self._get_connection() as conn:
-
                 conn.execute("BEGIN IMMEDIATE")
 
                 try:
-
-                    messages_json = None
+                    # messages 테이블에 직접 저장
                     if messages:
-
+                        # 현재 최대 turn_id 조회
                         cursor = conn.execute(
-                            'SELECT messages_json FROM sessions WHERE session_id = ?',
+                            'SELECT MAX(turn_id) FROM messages WHERE session_id = ?',
                             (session_id,)
                         )
                         row = cursor.fetchone()
-                        existing = []
-                        if row and row[0]:
-                            try:
-                                existing = json.loads(row[0])
-                            except json.JSONDecodeError:
-                                pass
+                        base_turn_id = (row[0] or -1) + 1
 
-                        base_turn_id = len(existing)
                         for i, msg in enumerate(messages):
-                            existing.append({
-                                'turn_id': base_turn_id + i,
-                                'role': msg.get('role', 'unknown'),
-                                'content': msg.get('content', ''),
-                                'timestamp': msg.get('timestamp', datetime.now(VANCOUVER_TZ).isoformat()),
-                                'emotional_context': msg.get('emotional_context', 'neutral')
-                            })
-                        messages_json = json.dumps(existing, ensure_ascii=False)
+                            conn.execute("""
+                                INSERT OR IGNORE INTO messages (session_id, turn_id, role, content, timestamp, emotional_context)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                            """, (
+                                session_id,
+                                base_turn_id + i,
+                                msg.get('role', 'unknown'),
+                                msg.get('content', ''),
+                                msg.get('timestamp', datetime.now(VANCOUVER_TZ).isoformat()),
+                                msg.get('emotional_context', 'neutral')
+                            ))
 
+                    # sessions 테이블 업데이트 (summary=NULL, messages_json=NULL)
                     conn.execute("""
                         INSERT OR REPLACE INTO sessions
                         (session_id, summary, key_topics, emotional_tone,
                          turn_count, started_at, ended_at, expires_at, messages_json)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL)
                     """, (
                         session_id,
-                        summary,
                         json.dumps(key_topics, ensure_ascii=False),
                         emotional_tone,
                         turn_count,
                         started_at.isoformat(),
                         ended_at.isoformat(),
                         expires_at.isoformat(),
-                        messages_json
                     ))
 
                     conn.commit()
-                    _log.info("MEM session_save", session_id=session_id[:8], turns=turn_count)
+                    _log.info("MEM session_save", session_id=session_id[:8], turns=turn_count, msgs=len(messages) if messages else 0)
                     return True
 
                 except Exception as e:
@@ -305,71 +379,74 @@ class SessionArchive:
             return []
 
     def get_recent_summaries(self, limit: int = 5, max_tokens: int = 2000) -> str:
-
+        """messages 테이블에서 직접 최근 대화 조회 (날짜별 그룹핑)"""
         try:
             with self._get_connection() as conn:
                 conn.row_factory = sqlite3.Row
 
+                # messages 테이블에서 직접 조회
                 cursor = conn.execute("""
-                    SELECT session_id, summary, key_topics, emotional_tone,
-                           turn_count, started_at, ended_at, messages_json
-                    FROM sessions
-                    ORDER BY ended_at DESC
+                    SELECT role, content, timestamp, emotional_context
+                    FROM messages
+                    ORDER BY timestamp DESC
                     LIMIT ?
-                """, (limit,))
+                """, (limit * 20,))  # 충분히 많이 가져옴
 
                 rows = cursor.fetchall()
+                if not rows:
+                    return "최근 대화 기록이 없습니다."
+
                 parts = []
                 char_count = 0
+
+                # 날짜별 대화량 집계
+                from collections import Counter
+                date_counts = Counter()
                 all_messages = []
 
                 for row in rows:
-                    ended = datetime.fromisoformat(row['ended_at'])
-                    elapsed = datetime.now(VANCOUVER_TZ) - ended.replace(tzinfo=VANCOUVER_TZ)
+                    ts = row['timestamp'][:10] if row['timestamp'] else ''
+                    if ts:
+                        date_counts[ts] += 1
+                    all_messages.append({
+                        'role': row['role'],
+                        'content': row['content'],
+                        'timestamp': row['timestamp'],
+                        'emotional_context': row['emotional_context']
+                    })
 
-                    if elapsed < timedelta(hours=1):
-                        time_str = f"{int(elapsed.total_seconds() / 60)}분 전"
-                    elif elapsed < timedelta(days=1):
-                        time_str = f"{int(elapsed.total_seconds() / 3600)}시간 전"
-                    else:
-                        time_str = f"{elapsed.days}일 전"
+                # 날짜별 대화량 표시
+                if date_counts:
+                    parts.append("날짜별 대화량:")
+                    for d, cnt in sorted(date_counts.items(), reverse=True)[:10]:
+                        parts.append(f"  {d}: {cnt}개")
+                        char_count += 20
 
-                    topics = json.loads(row['key_topics']) if row['key_topics'] else []
-                    topics_str = ", ".join(topics[:3]) if topics else "기록 없음"
+                # 최근 메시지 샘플 (시간순 정렬)
+                recent_msgs = sorted(all_messages, key=lambda m: m.get('timestamp', ''), reverse=True)[:20]
+                if recent_msgs:
+                    parts.append("\n최근 대화:")
+                    for msg in recent_msgs:
+                        ts = msg.get('timestamp', '')[:16] if msg.get('timestamp') else ''
+                        role = msg.get('role', '?')
+                        content_preview = msg.get('content', '')[:80].replace('\n', ' ')
+                        msg_line = f"  [{ts}] {role}: {content_preview}..."
+                        if char_count + len(msg_line) > max_tokens * 2:
+                            parts.append("  ...(더 많은 기록 있음)")
+                            break
+                        parts.append(msg_line)
+                        char_count += len(msg_line)
 
-                    summary_line = f"[{time_str}] {row['summary'][:150]} (주제: {topics_str})"
-                    parts.append(summary_line)
-                    char_count += len(summary_line)
-
-                    if row['messages_json']:
-                        try:
-                            msgs = json.loads(row['messages_json'])
-                            all_messages.extend(msgs)
-                        except json.JSONDecodeError:
-                            pass
-
-                if all_messages:
-                    from collections import Counter
-                    date_counts = Counter()
-                    for msg in all_messages:
-                        ts = msg.get('timestamp', '')[:10]
-                        if ts:
-                            date_counts[ts] += 1
-
-                    if date_counts:
-                        parts.append("\n 날짜별 대화량:")
-                        for d, cnt in sorted(date_counts.items(), reverse=True)[:10]:
-                            parts.append(f"  {d}: {cnt}개")
-                            char_count += 20
-
-                if char_count < max_tokens * 2 and all_messages:
+                # 과거 대화 샘플
+                if char_count < max_tokens * 2:
                     import random
-                    older_msgs = [m for m in all_messages if m.get('timestamp', '')[:10] < (datetime.now(VANCOUVER_TZ) - timedelta(days=2)).strftime('%Y-%m-%d')]
+                    cutoff_date = (datetime.now(VANCOUVER_TZ) - timedelta(days=2)).strftime('%Y-%m-%d')
+                    older_msgs = [m for m in all_messages if m.get('timestamp', '')[:10] < cutoff_date]
                     if older_msgs:
                         samples = random.sample(older_msgs, min(5, len(older_msgs)))
-                        parts.append("\n 과거 대화 샘플:")
+                        parts.append("\n과거 대화 샘플:")
                         for msg in samples:
-                            date_str = msg.get('timestamp', '')[:10]
+                            date_str = msg.get('timestamp', '')[:10] if msg.get('timestamp') else '?'
                             content_preview = msg.get('content', '')[:80].replace('\n', ' ')
                             parts.append(f"  [{date_str}] {msg.get('role', '?')}: {content_preview}...")
 
@@ -436,7 +513,7 @@ class SessionArchive:
         limit: int = 10,
         max_tokens: int = 3000
     ) -> str:
-
+        """messages 테이블에서 직접 날짜 범위로 조회"""
         if not to_date:
             to_date = from_date
 
@@ -444,41 +521,33 @@ class SessionArchive:
             with self._get_connection() as conn:
                 conn.row_factory = sqlite3.Row
 
+                # messages 테이블에서 날짜 범위로 직접 조회
                 cursor = conn.execute("""
-                    SELECT messages_json FROM sessions
-                    WHERE messages_json IS NOT NULL
-                """)
+                    SELECT role, content, timestamp, emotional_context
+                    FROM messages
+                    WHERE timestamp >= ? AND timestamp < date(?, '+1 day')
+                    ORDER BY timestamp ASC
+                    LIMIT ?
+                """, (from_date, to_date, limit * 2))
 
-                all_messages = []
-                for row in cursor.fetchall():
-                    try:
-                        msgs = json.loads(row['messages_json'])
-                        for msg in msgs:
-                            ts = msg.get('timestamp', '')[:10]
-                            if from_date <= ts <= to_date:
-                                all_messages.append(msg)
-                    except json.JSONDecodeError:
-                        pass
-
-                all_messages.sort(key=lambda m: m.get('timestamp', ''))
-
-                if not all_messages:
+                rows = cursor.fetchall()
+                if not rows:
                     return f"{from_date} ~ {to_date} 기간에 대화 기록이 없습니다."
 
                 messages = []
                 char_count = 0
 
-                for msg in all_messages[:limit * 2]:
+                for row in rows:
                     try:
-                        ts = msg.get('timestamp', '')[:16]
-                        date_str = ts[5:10]
-                        time_str = ts[11:16]
+                        ts = row['timestamp'][:16] if row['timestamp'] else ''
+                        date_str = ts[5:10] if len(ts) >= 10 else "?"
+                        time_str = ts[11:16] if len(ts) >= 16 else "?"
                     except (TypeError, IndexError):
                         date_str = "?"
                         time_str = "?"
 
-                    role = msg.get('role', '?')
-                    content = msg.get('content', '')[:200].replace('\n', ' ')
+                    role = row['role'] or '?'
+                    content = (row['content'] or '')[:200].replace('\n', ' ')
 
                     msg_line = f"[{date_str} {time_str}] {role}: {content}..."
 
@@ -489,7 +558,7 @@ class SessionArchive:
                     messages.append(msg_line)
                     char_count += len(msg_line)
 
-                _log.debug("MEM qry_temporal", from_d=from_date, to_d=to_date, res=len(all_messages))
+                _log.debug("MEM qry_temporal", from_d=from_date, to_d=to_date, res=len(rows))
 
                 return "\n".join(messages)
 
@@ -516,26 +585,170 @@ class SessionArchive:
             _log.error("Get time since last session failed", error=str(e))
             return None
 
+    async def summarize_expired(self, llm_client=None) -> Dict[str, int]:
+        """
+        MESSAGE_ARCHIVE_AFTER_DAYS 지난 세션의 메시지를 축약 처리:
+        1. 만료된 세션의 메시지 조회
+        2. LLM으로 세션 단위 요약 생성
+        3. 원본 메시지를 archived_messages로 이동
+        4. sessions.summary에 요약 저장
+        5. messages 테이블에서 원본 삭제
+
+        Returns: {"sessions_processed": N, "messages_archived": M}
+        """
+        result = {"sessions_processed": 0, "messages_archived": 0}
+
+        try:
+            with self._get_connection() as conn:
+                # 만료된 세션 조회 (summary가 NULL인 것만)
+                cursor = conn.execute("""
+                    SELECT session_id FROM sessions
+                    WHERE expires_at < datetime('now')
+                    AND summary IS NULL
+                    LIMIT 10
+                """)
+                expired_sessions = [row[0] for row in cursor.fetchall()]
+
+                if not expired_sessions:
+                    _log.debug("No expired sessions to summarize")
+                    return result
+
+                _log.info("Summarizing expired sessions", count=len(expired_sessions))
+
+                for session_id in expired_sessions:
+                    try:
+                        # 해당 세션의 메시지 조회
+                        conn.row_factory = sqlite3.Row
+                        cursor = conn.execute("""
+                            SELECT id, turn_id, role, content, timestamp, emotional_context
+                            FROM messages
+                            WHERE session_id = ?
+                            ORDER BY turn_id ASC
+                        """, (session_id,))
+                        messages = cursor.fetchall()
+
+                        if not messages:
+                            continue
+
+                        # LLM으로 요약 생성
+                        summary = await self._generate_session_summary(messages, llm_client)
+
+                        if not summary:
+                            _log.warning("Failed to generate summary", session_id=session_id[:8])
+                            continue
+
+                        # 트랜잭션으로 원자적 처리
+                        conn.execute("BEGIN IMMEDIATE")
+                        try:
+                            # 1. archived_messages로 원본 이동
+                            for msg in messages:
+                                conn.execute("""
+                                    INSERT INTO archived_messages
+                                    (session_id, turn_id, role, content, timestamp, emotional_context)
+                                    VALUES (?, ?, ?, ?, ?, ?)
+                                """, (
+                                    session_id,
+                                    msg['turn_id'],
+                                    msg['role'],
+                                    msg['content'],
+                                    msg['timestamp'],
+                                    msg['emotional_context']
+                                ))
+
+                            # 2. sessions.summary 업데이트
+                            conn.execute("""
+                                UPDATE sessions SET summary = ? WHERE session_id = ?
+                            """, (summary, session_id))
+
+                            # 3. messages 테이블에서 삭제
+                            conn.execute("""
+                                DELETE FROM messages WHERE session_id = ?
+                            """, (session_id,))
+
+                            conn.commit()
+
+                            result["sessions_processed"] += 1
+                            result["messages_archived"] += len(messages)
+
+                            _log.info(
+                                "Session summarized",
+                                session_id=session_id[:8],
+                                messages=len(messages),
+                                summary_len=len(summary)
+                            )
+
+                        except Exception as e:
+                            conn.rollback()
+                            raise
+
+                    except Exception as e:
+                        _log.error("Session summarize failed", session_id=session_id[:8], error=str(e))
+                        continue
+
+        except Exception as e:
+            _log.error("Summarize expired failed", error=str(e))
+
+        return result
+
+    async def _generate_session_summary(self, messages: List[Any], llm_client=None) -> Optional[str]:
+        """세션 메시지들을 LLM으로 요약"""
+        if not messages:
+            return None
+
+        # 메시지 포맷팅
+        conversation_text = []
+        for msg in messages[:50]:  # 최대 50개 메시지만
+            role = msg['role'] if msg['role'] else 'unknown'
+            content = (msg['content'] or '')[:500]  # 각 메시지 500자 제한
+            conversation_text.append(f"{role}: {content}")
+
+        full_conversation = "\n".join(conversation_text)
+
+        prompt = f"""다음 대화를 간결하게 요약해주세요.
+
+대화 내용:
+{full_conversation[:5000]}
+
+요약 규칙:
+- 핵심 주제와 결론만 포함
+- 2-3문장으로 요약
+- 사용자가 요청한 것과 AI가 제공한 것 중심
+- 중요한 정보(이름, 날짜, 결정사항)는 보존
+
+요약:"""
+
+        try:
+            if llm_client:
+                response = await llm_client.generate(prompt, max_tokens=300)
+            else:
+                # LLM 클라이언트가 없으면 기본 요약 생성
+                from backend.llm import get_llm_client
+                llm = get_llm_client("gemini", MESSAGE_SUMMARY_MODEL)
+                response = await llm.generate(prompt, max_tokens=300)
+
+            if response:
+                return response.strip()
+            return None
+
+        except Exception as e:
+            _log.warning("Summary generation failed", error=str(e))
+            return None
+
     def cleanup_expired(self) -> int:
 
-        _log.debug("cleanup_expired called but message deletion is disabled (permanent archive)")
+        _log.debug("cleanup_expired called but message deletion is disabled (use summarize_expired instead)")
         return 0
 
     def get_stats(self) -> Dict[str, Any]:
-
+        """messages 테이블에서 직접 통계 조회"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.execute("SELECT COUNT(*) FROM sessions")
                 session_count = cursor.fetchone()[0]
 
-                cursor = conn.execute("SELECT messages_json FROM sessions WHERE messages_json IS NOT NULL")
-                message_count = 0
-                for row in cursor.fetchall():
-                    try:
-                        msgs = json.loads(row[0])
-                        message_count += len(msgs)
-                    except json.JSONDecodeError:
-                        pass
+                # messages 테이블에서 직접 카운트
+                cursor = conn.execute("SELECT COUNT(*) FROM messages")
+                message_count = cursor.fetchone()[0]
 
                 cursor = conn.execute("""
                     SELECT COUNT(*) FROM sessions

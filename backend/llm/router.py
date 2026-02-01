@@ -25,7 +25,7 @@ class ModelConfig:
 
 DEFAULT_MODEL = ModelConfig(
     id="gemini",
-    name="Gemini 3 Pro",
+    name="Gemini 3 Flash",
     provider="google",
     model=MODEL_NAME,
 )

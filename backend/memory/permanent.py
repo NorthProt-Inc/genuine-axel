@@ -9,38 +9,41 @@ from typing import Optional, List, Dict, Any, Set
 import json
 import uuid
 import math
-from backend.config import CHROMADB_PATH
+from backend.config import (
+    CHROMADB_PATH,
+    MEMORY_BASE_DECAY_RATE,
+    MEMORY_MIN_RETENTION,
+    MEMORY_DECAY_DELETE_THRESHOLD,
+    MEMORY_SIMILARITY_THRESHOLD,
+    MEMORY_MIN_IMPORTANCE,
+)
 from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver
+from backend.core.utils.text_utils import sanitize_memory_text
 
 _log = get_logger("memory.permanent")
 
 class MemoryConfig:
+    """Memory 설정 - config.py에서 값을 가져오고, 나머지는 기본값 사용"""
 
     FLUSH_THRESHOLD = 50
     FLUSH_INTERVAL_SECONDS = 300
 
-    BASE_DECAY_RATE = 0.005
+    # config.py에서 가져오는 값들
+    BASE_DECAY_RATE = MEMORY_BASE_DECAY_RATE
+    MIN_RETENTION = MEMORY_MIN_RETENTION
+    DECAY_DELETE_THRESHOLD = MEMORY_DECAY_DELETE_THRESHOLD
+    DUPLICATE_THRESHOLD = MEMORY_SIMILARITY_THRESHOLD
+    MIN_IMPORTANCE = MEMORY_MIN_IMPORTANCE
 
+    # 기본값 유지
     ACCESS_STABILITY_K = 0.3
-
     RELATION_RESISTANCE_K = 0.1
-
-    MIN_RETENTION = 0.1
-
     REASSESS_AGE_HOURS = 168
     REASSESS_BATCH_SIZE = 50
-
-    DECAY_RATE = 0.01
-
+    DECAY_RATE = 0.002
     MIN_REPETITIONS = 1
-    MIN_IMPORTANCE = 0.25
-
-    DUPLICATE_THRESHOLD = 0.90
     SIMILAR_THRESHOLD = 0.75
-
-    DECAY_DELETE_THRESHOLD = 0.1
     PRESERVE_REPETITIONS = 3
-
     EMBEDDING_MODEL = "models/gemini-embedding-001"
 
 def get_memory_age_hours(created_at: str) -> float:
@@ -56,28 +59,63 @@ def get_memory_age_hours(created_at: str) -> float:
     except Exception:
         return 0
 
+# Memory type-specific decay multipliers (lower = slower decay)
+MEMORY_TYPE_DECAY_MULTIPLIERS = {
+    "fact": 0.3,           # Facts decay slowly (user name, important dates)
+    "preference": 0.5,     # Preferences decay moderately
+    "insight": 0.7,        # Insights decay somewhat faster
+    "conversation": 1.0,   # Regular conversation decays at base rate
+}
+
+
 def apply_adaptive_decay(
     importance: float,
     created_at: str,
     access_count: int = 0,
     connection_count: int = 0,
-    last_accessed: str = None
+    last_accessed: str = None,
+    memory_type: str = None,
 ) -> float:
+    """
+    Apply adaptive decay to memory importance based on age and usage.
 
+    Args:
+        importance: Original importance score (0-1)
+        created_at: ISO timestamp of memory creation
+        access_count: Number of times memory was accessed
+        connection_count: Number of graph connections
+        last_accessed: ISO timestamp of last access
+        memory_type: Memory category (fact, preference, insight, conversation)
+
+    Returns:
+        Decayed importance score
+    """
     if not created_at:
         return importance
 
     try:
         hours_passed = get_memory_age_hours(created_at)
 
+        # Stability from access count (more access = slower decay)
         stability = 1 + MemoryConfig.ACCESS_STABILITY_K * math.log(1 + access_count)
 
+        # Resistance from connections (more connections = slower decay)
         resistance = min(1.0, connection_count * MemoryConfig.RELATION_RESISTANCE_K)
 
-        effective_rate = MemoryConfig.BASE_DECAY_RATE / stability * (1 - resistance)
+        # Type-specific decay rate
+        type_multiplier = MEMORY_TYPE_DECAY_MULTIPLIERS.get(memory_type, 1.0)
+
+        # Calculate effective decay rate
+        effective_rate = (
+            MemoryConfig.BASE_DECAY_RATE
+            * type_multiplier
+            / stability
+            * (1 - resistance)
+        )
 
         decayed = importance * math.exp(-effective_rate * hours_passed)
 
+        # Recency paradox: old memory recently accessed gets a boost
         if last_accessed:
             last_access_hours = get_memory_age_hours(last_accessed)
 
@@ -380,6 +418,8 @@ class LongTermMemory:
         event_timestamp: str = None,
         force: bool = False
     ) -> Optional[str]:
+        # 텍스트 정제 (이모지, 특수문자 제거)
+        content = sanitize_memory_text(content)
 
         content_key = self._get_content_key(content)
 

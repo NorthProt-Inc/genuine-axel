@@ -89,7 +89,22 @@ class MemoryManager:
             return None
 
         with self._write_lock:
-            return self.working.add(role, content, emotional_context)
+            msg = self.working.add(role, content, emotional_context)
+
+            # 매 턴 SQL 저장 추가
+            if msg and self.session_archive:
+                try:
+                    self.session_archive.save_message_immediate(
+                        session_id=self.working.session_id,
+                        role=msg.role,
+                        content=msg.content,
+                        timestamp=msg.timestamp.isoformat(),
+                        emotional_context=msg.emotional_context
+                    )
+                except Exception as e:
+                    _log.warning("Immediate message save failed", error=str(e))
+
+            return msg
 
     def get_working_context(self) -> str:
 
@@ -275,7 +290,7 @@ class MemoryManager:
 
             for i, (name, res) in enumerate(zip(["longterm", "sessions", "graph"], results)):
                 if isinstance(res, Exception):
-                    _log.warning(f"Memory task {name} failed", error=str(res))
+                    _log.warning("Memory task failed", task=name, error=str(res)[:100])
 
             if memgpt_result:
                 selected_memories, tokens_used = memgpt_result

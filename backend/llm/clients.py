@@ -130,7 +130,7 @@ class LLMProvider:
 
 LLM_PROVIDERS: Dict[str, LLMProvider] = {
     "google": LLMProvider(
-        name="Gemini 3 Pro",
+        name="Gemini 3 Flash",
         model=MODEL_NAME,
         provider="google",
         api_key_env="GEMINI_API_KEY",

@@ -196,21 +196,148 @@ async def get_session_detail(session_id: str):
         return {"error": "Session archive not available"}
 
     try:
+        # 기존 get_session_detail() 메서드 활용
+        detail = state.memory_manager.session_archive.get_session_detail(session_id)
 
-        with state.memory_manager.session_archive._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT role, content, timestamp FROM messages
-                WHERE session_id = ? ORDER BY turn_id ASC
-            """, (session_id,))
-            rows = cursor.fetchall()
+        if not detail:
+            # messages 테이블에서 직접 조회 (get_session_detail이 None인 경우)
+            with state.memory_manager.session_archive._get_connection() as conn:
+                import sqlite3
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT role, content, timestamp FROM messages
+                    WHERE session_id = ? ORDER BY turn_id ASC
+                """, (session_id,))
+                rows = cursor.fetchall()
 
-        messages = [
-            {"role": row[0], "content": row[1], "timestamp": row[2]}
-            for row in rows
-        ]
+            messages = [
+                {"role": row[0], "content": row[1], "timestamp": row[2]}
+                for row in rows
+            ]
+            return {"session_id": session_id, "messages": messages}
 
-        return {"session_id": session_id, "messages": messages}
+        # 세션 정보와 메시지 함께 반환
+        session_info = detail.get("session", {})
+        messages = detail.get("messages", [])
+
+        # messages가 비어있으면 messages 테이블에서 조회
+        if not messages:
+            with state.memory_manager.session_archive._get_connection() as conn:
+                import sqlite3
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT role, content, timestamp FROM messages
+                    WHERE session_id = ? ORDER BY turn_id ASC
+                """, (session_id,))
+                rows = cursor.fetchall()
+                messages = [
+                    {"role": row['role'], "content": row['content'], "timestamp": row['timestamp']}
+                    for row in rows
+                ]
+
+        return {
+            "session_id": session_id,
+            "summary": session_info.get("summary"),
+            "key_topics": session_info.get("key_topics"),
+            "emotional_tone": session_info.get("emotional_tone"),
+            "messages": messages
+        }
     except Exception as e:
         _logger.error("Get session detail error", error=str(e))
+        return {"error": str(e)}
+
+
+@router.get("/memory/interaction-logs")
+async def get_interaction_logs(limit: int = 20):
+    """모델 라우팅 로그 조회 - 사용 모델, 티어, 지연시간, 토큰 수 통계"""
+    state = get_state()
+
+    if not state.memory_manager or not state.memory_manager.session_archive:
+        return {"logs": [], "error": "Session archive not available"}
+
+    try:
+        logs = state.memory_manager.session_archive.get_recent_interaction_logs(limit)
+        return {"logs": logs, "count": len(logs)}
+    except Exception as e:
+        _logger.error("Get interaction logs error", error=str(e))
+        return {"logs": [], "error": str(e)}
+
+
+@router.get("/memory/interaction-stats")
+async def get_interaction_stats():
+    """모델별/티어별 사용 통계 요약"""
+    state = get_state()
+
+    if not state.memory_manager or not state.memory_manager.session_archive:
+        return {"error": "Session archive not available"}
+
+    try:
+        with state.memory_manager.session_archive._get_connection() as conn:
+            import sqlite3
+            conn.row_factory = sqlite3.Row
+
+            # 모델별 통계
+            cursor = conn.execute("""
+                SELECT
+                    effective_model,
+                    COUNT(*) as call_count,
+                    AVG(latency_ms) as avg_latency_ms,
+                    SUM(tokens_in) as total_tokens_in,
+                    SUM(tokens_out) as total_tokens_out
+                FROM interaction_logs
+                GROUP BY effective_model
+                ORDER BY call_count DESC
+            """)
+            by_model = [dict(row) for row in cursor.fetchall()]
+
+            # 티어별 통계
+            cursor = conn.execute("""
+                SELECT
+                    tier,
+                    COUNT(*) as call_count,
+                    AVG(latency_ms) as avg_latency_ms,
+                    SUM(tokens_in) as total_tokens_in,
+                    SUM(tokens_out) as total_tokens_out
+                FROM interaction_logs
+                GROUP BY tier
+                ORDER BY call_count DESC
+            """)
+            by_tier = [dict(row) for row in cursor.fetchall()]
+
+            # 라우터 결정 분포
+            cursor = conn.execute("""
+                SELECT
+                    router_reason,
+                    COUNT(*) as count
+                FROM interaction_logs
+                GROUP BY router_reason
+                ORDER BY count DESC
+                LIMIT 10
+            """)
+            by_router_reason = [dict(row) for row in cursor.fetchall()]
+
+            # 최근 24시간 통계
+            cursor = conn.execute("""
+                SELECT
+                    COUNT(*) as total_calls,
+                    AVG(latency_ms) as avg_latency_ms,
+                    SUM(tokens_in) as total_tokens_in,
+                    SUM(tokens_out) as total_tokens_out,
+                    SUM(CASE WHEN refusal_detected = 1 THEN 1 ELSE 0 END) as refusal_count
+                FROM interaction_logs
+                WHERE ts >= datetime('now', '-24 hours')
+            """)
+            last_24h = dict(cursor.fetchone())
+
+            return {
+                "by_model": by_model,
+                "by_tier": by_tier,
+                "by_router_reason": by_router_reason,
+                "last_24h": last_24h
+            }
+
+    except Exception as e:
+        _logger.error("Get interaction stats error", error=str(e))
         return {"error": str(e)}

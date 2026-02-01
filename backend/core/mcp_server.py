@@ -26,6 +26,8 @@ from mcp.types import (
 )
 import mcp.types as types
 from fastapi import FastAPI, Request, Response
+from starlette.routing import Route, Mount
+from starlette.responses import Response as StarletteResponse
 from sse_starlette.sse import EventSourceResponse
 import uvicorn
 
@@ -140,7 +142,7 @@ from backend.protocols.mcp.async_research import (
     get_active_research_tasks,
 )
 
-from backend.core.mcp_tools import get_tool_handler, is_tool_registered
+from backend.core.mcp_tools import get_tool_handler, is_tool_registered, list_tools as list_registered_tools
 
 @mcp_server.list_tools()
 async def list_tools() -> list[Tool]:
@@ -758,23 +760,51 @@ file_paths: 관련 파일 경로 (쉼표 구분)
 
 @mcp_server.call_tool()
 async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | types.ImageContent | types.EmbeddedResource]:
+    """
+    Execute a tool by name with robust error handling.
+
+    This is the central dispatch point for all MCP tool calls. It ensures:
+    1. Tools are always executed (never leaked as plain text)
+    2. Errors are properly caught and returned as TextContent
+    3. Logging provides visibility into tool execution
+    """
+    import asyncio
+
+    _log.info("TOOL call recv", tool=name, args_keys=list(arguments.keys()) if arguments else [])
 
     try:
+        # Validate arguments
+        if arguments is None:
+            arguments = {}
 
+        # Check if tool is registered in the new registry
         if is_tool_registered(name):
             handler = get_tool_handler(name)
-            return await handler(arguments)
 
-        _log.warning(f"Tool '{name}' not found in registry, using legacy handler")
+            # Execute with timeout to prevent hanging
+            try:
+                result = await asyncio.wait_for(
+                    handler(arguments),
+                    timeout=300.0  # 5 minute max for any tool
+                )
+                _log.info("TOOL exec done", tool=name, result_cnt=len(result) if result else 0)
+                return result
+
+            except asyncio.TimeoutError:
+                _log.error("TOOL timeout", tool=name)
+                return [TextContent(type="text", text=f"Error: Tool '{name}' timed out after 300 seconds")]
+
+        # Tool not in new registry - this is a critical error
+        _log.error("Tool not found in registry", tool=name, available=list_registered_tools()[:10])
+        return [TextContent(type="text", text=f"Error: Unknown tool '{name}'. Tool call was intercepted but handler not found.")]
 
     except ValueError as e:
-        _log.error(f"Tool dispatch error: {e}")
+        _log.error("Tool dispatch error", tool=name, err=str(e)[:100])
         return [TextContent(type="text", text=f"Error: {str(e)}")]
-    except Exception as e:
-        _log.error(f"Tool '{name}' failed: {e}", exc_info=True)
-        return [TextContent(type="text", text=f"Error executing {name}: {str(e)}")]
 
-    raise ValueError(f"Unknown tool: {name}")
+    except Exception as e:
+        _log.error("Tool exec failed", tool=name, err=str(e)[:100], exc_info=True)
+        return [TextContent(type="text", text=f"Error executing {name}: {str(e)}")]
 
 @mcp_server.list_resource_templates()
 async def list_resource_templates() -> list[types.ResourceTemplate]:
@@ -793,27 +823,27 @@ class MCPSSETransport:
 
         connection_id = id(scope)
         active_connections.add(connection_id)
-        _log.info(f"SSE connection opened: {connection_id}")
+        _log.info("SSE conn opened", conn_id=connection_id)
 
         try:
             async with self._sse.connect_sse(scope, receive, send) as streams:
                 yield streams
         except asyncio.CancelledError:
-            _log.info(f"SSE connection cancelled: {connection_id}")
+            _log.info("SSE conn cancelled", conn_id=connection_id)
             raise
         except Exception as e:
-            _log.error(f"SSE connection error: {connection_id}, {str(e)}")
+            _log.error("SSE conn error", conn_id=connection_id, err=str(e)[:100])
             raise
         finally:
             active_connections.discard(connection_id)
-            _log.info(f"SSE connection closed: {connection_id}, active={len(active_connections)}")
+            _log.info("SSE conn closed", conn_id=connection_id, active=len(active_connections))
 
     async def handle_post_message(self, scope, receive, send):
 
         try:
             await self._sse.handle_post_message(scope, receive, send)
         except Exception as e:
-            _log.error(f"POST message handling error: {str(e)}")
+            _log.error("POST msg handling error", err=str(e)[:100])
             raise
 
 sse_transport = MCPSSETransport("/messages")
@@ -829,57 +859,24 @@ async def health_check():
         "server": "axel-mcp-server"
     }
 
-@app.get("/sse")
-async def handle_sse(request: Request):
-
-    headers = {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-    }
-
-    async def sse_generator():
-
-        connection_id = id(request.scope)
-        active_connections.add(connection_id)
-        _log.info(f"SSE stream started: {connection_id}")
-
-        try:
-            async with sse_transport._sse.connect_sse(
-                request.scope,
-                request.receive,
-                request._send
-            ) as streams:
-
-                heartbeat_task = asyncio.create_task(
-                    _send_heartbeat(streams[1], connection_id)
-                )
-
-                try:
-                    await mcp_server.run(
-                        streams[0],
-                        streams[1],
-                        mcp_server.create_initialization_options()
-                    )
-                finally:
-                    heartbeat_task.cancel()
-                    try:
-                        await heartbeat_task
-                    except asyncio.CancelledError:
-                        pass
-
-        except asyncio.CancelledError:
-            _log.info(f"SSE stream cancelled by client: {connection_id}")
-        except Exception as e:
-            _log.error(f"SSE stream error: {connection_id}, error={str(e)}")
-        finally:
-            active_connections.discard(connection_id)
-            _log.info(f"SSE stream ended: {connection_id}")
+async def _send_heartbeat(write_stream, connection_id: int):
 
     try:
-        async with sse_transport.connect_sse_with_keepalive(
+        while True:
+            await asyncio.sleep(SSE_KEEPALIVE_INTERVAL)
+
+            _log.debug("Heartbeat sent", conn_id=connection_id)
+    except asyncio.CancelledError:
+        _log.debug("Heartbeat cancelled", conn_id=connection_id)
+
+async def handle_sse(request: Request):
+    """SSE endpoint handler - uses Starlette pattern for proper SSE handling."""
+    connection_id = id(request.scope)
+    active_connections.add(connection_id)
+    _log.info("SSE conn opened", conn_id=connection_id)
+
+    try:
+        async with sse_transport._sse.connect_sse(
             request.scope,
             request.receive,
             request._send
@@ -889,38 +886,65 @@ async def handle_sse(request: Request):
                 streams[1],
                 mcp_server.create_initialization_options()
             )
-    except Exception as e:
-        _log.error(f"SSE handler error: {str(e)}")
-
-    return Response(status_code=204)
-
-async def _send_heartbeat(write_stream, connection_id: int):
-
-    try:
-        while True:
-            await asyncio.sleep(SSE_KEEPALIVE_INTERVAL)
-
-            _log.debug(f"Heartbeat sent: {connection_id}")
     except asyncio.CancelledError:
-        _log.debug(f"Heartbeat cancelled: {connection_id}")
+        _log.info("SSE conn cancelled by client", conn_id=connection_id)
+    except Exception as e:
+        _log.error("SSE handler error", conn_id=connection_id, err=str(e)[:100], exc_info=True)
+    finally:
+        active_connections.discard(connection_id)
+        _log.info("SSE conn closed", conn_id=connection_id, active=len(active_connections))
 
-@app.post("/messages")
-async def handle_messages(request: Request):
+    # Return empty response to satisfy ASGI (as per MCP SDK docs)
+    return StarletteResponse()
+
+# Create Starlette sub-app for MCP SSE (avoids FastAPI response handling conflicts)
+from starlette.applications import Starlette
+from starlette.routing import Route as StarletteRoute
+
+async def _handle_sse_raw(request: Request):
+    """Raw SSE handler that directly controls ASGI response."""
+    connection_id = id(request.scope)
+    active_connections.add(connection_id)
+    _log.info("SSE conn opened", conn_id=connection_id)
 
     try:
-        await sse_transport.handle_post_message(
+        async with sse_transport._sse.connect_sse(
             request.scope,
             request.receive,
             request._send
-        )
+        ) as streams:
+            await mcp_server.run(
+                streams[0],
+                streams[1],
+                mcp_server.create_initialization_options()
+            )
+    except asyncio.CancelledError:
+        _log.info("SSE conn cancelled by client", conn_id=connection_id)
     except Exception as e:
-        _log.error(f"Message handler error: {str(e)}")
-        return Response(
-            content=json.dumps({"error": str(e)}),
-            status_code=500,
-            media_type="application/json"
-        )
-    return Response(status_code=202)
+        _log.error("SSE handler error", conn_id=connection_id, err=str(e)[:100], exc_info=True)
+    finally:
+        active_connections.discard(connection_id)
+        _log.info("SSE conn closed", conn_id=connection_id, active=len(active_connections))
+
+    return StarletteResponse()
+
+async def _handle_messages_raw(request: Request):
+    """Raw messages handler for MCP POST requests."""
+    await sse_transport._sse.handle_post_message(
+        request.scope,
+        request.receive,
+        request._send
+    )
+    return StarletteResponse(status_code=202)
+
+# Starlette sub-app with SSE routes
+mcp_sse_app = Starlette(routes=[
+    StarletteRoute("/", endpoint=_handle_sse_raw, methods=["GET"]),
+    StarletteRoute("/messages", endpoint=_handle_messages_raw, methods=["POST"]),
+])
+
+# Mount the Starlette SSE app under /sse
+app.mount("/sse", mcp_sse_app)
 
 async def run_stdio_server():
 
@@ -935,7 +959,7 @@ async def run_stdio_server():
 
 def run_sse_server(host: str = "0.0.0.0", port: int = 8555):
 
-    _log.info(f"Starting MCP server in SSE mode on {host}:{port}")
+    _log.info("Starting MCP server in SSE mode", host=host, port=port)
     uvicorn.run(
         app,
         host=host,

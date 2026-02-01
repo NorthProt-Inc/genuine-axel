@@ -130,8 +130,8 @@ def end_request():
     status = "Done"
     lines.append(f"└─ {status} ({total_s:.1f}s total)")
 
-    for line in lines:
-        print(line)
+    summary = "\n".join(lines)
+    _logger.info("REQ summary", summary=summary)
 
     _current_request.set(None)
 
@@ -147,7 +147,6 @@ class track_request:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type:
-
-            print(f"└─ [ERROR]: {exc_val}")
+            _logger.error("REQ error", error=str(exc_val)[:100])
         end_request()
         return False

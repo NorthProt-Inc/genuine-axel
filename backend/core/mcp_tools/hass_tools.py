@@ -281,3 +281,108 @@ async def hass_list_entities_tool(arguments: dict[str, Any]) -> Sequence[TextCon
     except Exception as e:
         _log.error("TOOL fail", fn="hass_list_entities", err=str(e)[:100])
         return [TextContent(type="text", text=f"✗ List Error: {str(e)}")]
+
+
+@register_tool(
+    "hass_execute_scene",
+    category="hass",
+    description="""Execute a lighting scene - apply settings to multiple lights at once.
+
+PREDEFINED SCENES:
+- 'work': All lights on at 100%, neutral white
+- 'relax': All lights at 40%, warm white
+- 'night': All lights at 10%, warm orange
+- 'off': All lights off
+
+CUSTOM SCENE:
+Pass lights array with per-light settings.""",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "scene": {
+                "type": "string",
+                "description": "Predefined scene name: 'work', 'relax', 'night', 'off'",
+                "enum": ["work", "relax", "night", "off"]
+            },
+            "custom_lights": {
+                "type": "array",
+                "description": "Custom scene: array of {entity_id, brightness, color}",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "entity_id": {"type": "string"},
+                        "brightness": {"type": "integer", "minimum": 0, "maximum": 100},
+                        "color": {"type": "string"}
+                    },
+                    "required": ["entity_id"]
+                }
+            }
+        },
+        "required": []
+    }
+)
+async def hass_execute_scene_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+
+    scene = arguments.get("scene")
+    custom_lights = arguments.get("custom_lights", [])
+    _log.debug("TOOL invoke", fn="hass_execute_scene", scene=scene, custom_cnt=len(custom_lights))
+
+    if not scene and not custom_lights:
+        _log.warning("TOOL fail", fn="hass_execute_scene", err="scene or custom_lights required")
+        return [TextContent(type="text", text="Error: Either 'scene' or 'custom_lights' is required")]
+
+    try:
+        from backend.core.tools.hass_ops import hass_control_light
+
+        # Predefined scenes
+        SCENES = {
+            "work": {"brightness": 100, "color": "white"},
+            "relax": {"brightness": 40, "color": "warmwhite"},
+            "night": {"brightness": 10, "color": "orange"},
+            "off": {"action": "turn_off"},
+        }
+
+        results = []
+
+        if scene:
+            scene_config = SCENES.get(scene)
+            if not scene_config:
+                return [TextContent(type="text", text=f"Error: Unknown scene '{scene}'")]
+
+            action = scene_config.get("action", "turn_on")
+            result = await hass_control_light(
+                entity_id="all",
+                action=action,
+                brightness=scene_config.get("brightness"),
+                color=scene_config.get("color")
+            )
+
+            if result.success:
+                _log.info("TOOL ok", fn="hass_execute_scene", scene=scene)
+                return [TextContent(type="text", text=f"✓ Scene '{scene}' applied to all lights")]
+            else:
+                _log.warning("TOOL partial", fn="hass_execute_scene", err=result.error[:100] if result.error else None)
+                return [TextContent(type="text", text=f"✗ Scene failed: {result.error}")]
+
+        # Custom lights
+        for light in custom_lights[:10]:  # Max 10 lights
+            entity_id = light.get("entity_id")
+            if not entity_id:
+                continue
+
+            result = await hass_control_light(
+                entity_id=entity_id,
+                action="turn_on",
+                brightness=light.get("brightness"),
+                color=light.get("color")
+            )
+
+            status = "✓" if result.success else "✗"
+            results.append(f"{status} {entity_id}")
+
+        _log.info("TOOL ok", fn="hass_execute_scene", custom_cnt=len(results))
+        return [TextContent(type="text", text=f"Scene applied:\n" + "\n".join(results))]
+
+    except Exception as e:
+        _log.error("TOOL fail", fn="hass_execute_scene", err=str(e)[:100])
+        return [TextContent(type="text", text=f"✗ Scene Error: {str(e)}")]

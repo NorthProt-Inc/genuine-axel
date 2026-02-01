@@ -5,12 +5,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, AsyncGenerator, Dict, List, Optional
-
 from backend.core.utils.timezone import VANCOUVER_TZ
 from backend.config import (
     MAX_CODE_CONTEXT_CHARS,
     MAX_CODE_FILE_CHARS,
     MAX_SEARCH_CONTEXT_CHARS,
+    MEMORY_LONG_TERM_BUDGET,
 )
 from backend.core.context_optimizer import ContextOptimizer, get_dynamic_system_prompt
 from backend.core.logging import get_logger, request_tracker as rt
@@ -19,6 +19,66 @@ from backend.llm.router import DEFAULT_MODEL
 from backend.memory import calculate_importance_sync
 
 _log = get_logger("core.chat")
+
+# Regex pattern to strip XML-style tags from LLM output
+# Includes internal control tags AND MCP tool call tags that may leak during streaming
+_XML_TAG_PATTERN = re.compile(
+    r'</?(?:'
+    # Internal control tags
+    r'attempt_completion|result|thought|thinking|reflection|'
+    r'call:[^>]+|function_call|tool_call|tool_result|tool_use|'
+    r'antthinking|search_quality_reflection|search_quality_score|'
+    # MCP tool tags (도구 이름)
+    r'list_directory|retrieve_context|store_memory|add_memory|'
+    r'run_command|read_file|get_source_code|search_codebase|'
+    r'web_search|visit_webpage|deep_research|tavily_search|google_deep_research|'
+    r'hass_control_light|hass_control_device|hass_read_sensor|hass_get_state|hass_list_entities|'
+    r'delegate_to_opus|read_system_logs|analyze_log_errors|query_axel_memory|'
+    # MCP tool parameter tags (하위 태그)
+    r'path|query|command|content|entity_id|action|brightness|color|'
+    r'keyword|pattern|file_pattern|instruction|file_paths|category|importance|'
+    # Additional potential leakage tags
+    r'invoke|parameters|arguments|input|output|name|value'
+    r')[^>]*>',
+    re.IGNORECASE | re.DOTALL
+)
+
+# Pattern to detect complete tool call blocks that should be intercepted, not displayed
+_TOOL_BLOCK_PATTERN = re.compile(
+    r'<(?:function_call|tool_call|tool_use|invoke)[^>]*>.*?</(?:function_call|tool_call|tool_use|invoke)>',
+    re.IGNORECASE | re.DOTALL
+)
+
+# Pattern to detect partial/incomplete tool call opening tags (buffering needed)
+_PARTIAL_TOOL_PATTERN = re.compile(
+    r'<(?:function_call|tool_call|tool_use|invoke|call:)[^>]*$',
+    re.IGNORECASE
+)
+
+def _strip_xml_tags(text: str) -> str:
+    """Strip XML-style control tags from LLM output, preserving content."""
+    if not text:
+        return text
+
+    # First, remove complete tool call blocks entirely (these are leaked tool calls)
+    cleaned = _TOOL_BLOCK_PATTERN.sub('', text)
+
+    # Then remove individual XML tags, keeping the content between them
+    cleaned = _XML_TAG_PATTERN.sub('', cleaned)
+
+    # Clean up excessive whitespace left behind
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    cleaned = re.sub(r'  +', ' ', cleaned)  # collapse multiple spaces
+
+    return cleaned.strip()
+
+def _has_partial_tool_tag(text: str) -> bool:
+    """Check if text ends with a partial tool call tag that needs buffering."""
+    if not text:
+        return False
+    # Check last 100 chars for partial opening tag
+    tail = text[-100:] if len(text) > 100 else text
+    return bool(_PARTIAL_TOOL_PATTERN.search(tail))
 
 class EventType(str, Enum):
 
@@ -214,7 +274,7 @@ class ChatHandler:
         current_prompt = final_prompt
         current_system_prompt = full_prompt
         loop_count = 0
-        MAX_LOOPS = 5
+        MAX_LOOPS = 15
 
         yield ChatEvent(EventType.STATUS, "🔧 도구 준비 중...")
         from backend.core.mcp_client import get_mcp_client
@@ -235,6 +295,8 @@ class ChatHandler:
             loop_count += 1
             full_response = ""
             pending_function_calls = []
+            # Buffer for partial tool call detection
+            text_buffer = ""
 
             try:
                 _log.debug("LLM client init", provider=model_config.provider, model=model_config.model)
@@ -252,14 +314,41 @@ class ChatHandler:
                     force_tool_call=force_tool_call
                 ):
                     if function_call:
+                        # Flush any buffered text before processing tool call
+                        if text_buffer:
+                            filtered_buffer = _strip_xml_tags(text_buffer)
+                            if filtered_buffer:
+                                full_response += filtered_buffer
+                                yield ChatEvent(EventType.TEXT, filtered_buffer)
+                            text_buffer = ""
                         pending_function_calls.append(function_call)
                         _log.debug("TOOL detect", name=function_call["name"])
                     elif text:
                         if is_thought:
                             yield ChatEvent(EventType.THINKING, text)
                         else:
-                            full_response += text
-                            yield ChatEvent(EventType.TEXT, text)
+                            # Accumulate text in buffer to detect partial tool calls
+                            text_buffer += text
+
+                            # Check if buffer contains partial tool tag (needs more data)
+                            if _has_partial_tool_tag(text_buffer):
+                                # Keep buffering until we get more context
+                                continue
+
+                            # Filter and emit buffered text
+                            filtered_text = _strip_xml_tags(text_buffer)
+                            text_buffer = ""
+
+                            if filtered_text:
+                                full_response += filtered_text
+                                yield ChatEvent(EventType.TEXT, filtered_text)
+
+                # Flush remaining buffer at end of stream
+                if text_buffer:
+                    filtered_buffer = _strip_xml_tags(text_buffer)
+                    if filtered_buffer:
+                        full_response += filtered_buffer
+                        yield ChatEvent(EventType.TEXT, filtered_buffer)
 
             except Exception as e:
                 error_str = str(e).lower()
@@ -343,18 +432,64 @@ class ChatHandler:
 
             if tool_outputs:
                 observation = "\n".join(tool_outputs)
-                current_prompt += f"\n\n[Tool Execution Results]\n{observation}\n\n[Instruction]\n위 결과를 바탕으로 사용자에게 자연스럽게 보고해."
+                current_prompt += f"\n\n{observation}\n\n위 결과를 바탕으로 사용자에게 자연스럽게 보고해."
 
                 force_tool_call = False
                 _log.debug("REACT loop", iteration=loop_count)
             else:
                 break
 
+        # MAX_LOOPS 도달 후에도 마지막 도구 결과로 반드시 응답 생성
+        if loop_count >= MAX_LOOPS and pending_function_calls:
+            _log.info("MAX_LOOPS reached, generating final response", loops=loop_count)
+            try:
+                llm = get_llm_client(model_config.provider, model_config.model)
+                final_prompt = current_prompt + "\n\n[시스템: 도구 사용 한도에 도달했습니다. 지금까지의 결과를 종합해서 사용자에게 최종 응답을 해주세요.]"
+                final_buffer = ""
+
+                async for text, is_thought, function_call in llm.generate_stream(
+                    prompt=final_prompt,
+                    system_prompt=current_system_prompt,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                    enable_thinking=False,
+                    tools=None  # 도구 비활성화하여 반드시 텍스트 응답 생성
+                ):
+                    if text and not is_thought:
+                        final_buffer += text
+
+                        # Check for partial tags
+                        if _has_partial_tool_tag(final_buffer):
+                            continue
+
+                        # Filter and emit
+                        filtered_text = _strip_xml_tags(final_buffer)
+                        final_buffer = ""
+                        if filtered_text:
+                            full_response += filtered_text
+                            yield ChatEvent(EventType.TEXT, filtered_text)
+
+                # Flush remaining buffer
+                if final_buffer:
+                    filtered_text = _strip_xml_tags(final_buffer)
+                    if filtered_text:
+                        full_response += filtered_text
+                        yield ChatEvent(EventType.TEXT, filtered_text)
+
+            except Exception as e:
+                _log.error("Final response generation failed", error=str(e))
+                fallback = "도구 실행은 완료했는데, 최종 정리하다가 문제가 생겼어. 위 결과를 참고해줘!"
+                full_response += fallback
+                yield ChatEvent(EventType.TEXT, fallback)
+
         llm_elapsed = (time.perf_counter() - llm_start_time) * 1000
 
         yield ChatEvent(EventType.THINKING_END, "", metadata={
             "loops_completed": loop_count
         })
+
+        # Strip any leaked XML tags from the final response
+        full_response = _strip_xml_tags(full_response)
 
         await self._post_process(
             user_input=user_input,
@@ -533,8 +668,7 @@ class ChatHandler:
                 memgpt = getattr(self.state.memory_manager, 'memgpt', None) if self.state.memory_manager else None
                 if memgpt:
 
-                    tier_budgets = {"axel": 125_000}
-                    token_budget = tier_budgets.get(tier, 125_000)
+                    token_budget = MEMORY_LONG_TERM_BUDGET
 
                     selected_memories, used_tokens = memgpt.context_budget_select(
                         query=user_input,

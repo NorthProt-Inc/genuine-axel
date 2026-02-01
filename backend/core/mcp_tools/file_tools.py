@@ -34,7 +34,7 @@ async def read_file(arguments: dict[str, Any]) -> Sequence[TextContent]:
     is_valid, error = validate_path(path_str, operation="read")
 
     if not is_valid:
-        _log.warning("TOOL fail", fn="read_file", err=f"path validation: {error}"[:100])
+        _log.warning("TOOL fail", fn="read_file", err="path validation failed", reason=error[:80] if error else None)
         return [TextContent(type="text", text=f"Error: {error}")]
 
     try:
@@ -95,7 +95,7 @@ async def list_directory(arguments: dict[str, Any]) -> Sequence[TextContent]:
     is_valid, error = validate_path(path_str, operation="read")
 
     if not is_valid:
-        _log.warning("TOOL fail", fn="list_directory", err=f"path validation: {error}"[:100])
+        _log.warning("TOOL fail", fn="list_directory", err="path validation failed", reason=error[:80] if error else None)
         return [TextContent(type="text", text=f"Error: {error}")]
 
     try:
@@ -171,7 +171,7 @@ async def get_source_code(arguments: dict[str, Any]) -> Sequence[TextContent]:
 
         is_valid, error = validate_path(path_str, operation="read")
         if not is_valid:
-            _log.warning("TOOL fail", fn="get_source_code", err=f"path validation: {error}"[:100])
+            _log.warning("TOOL fail", fn="get_source_code", err="path validation failed", reason=error[:80] if error else None)
             return [TextContent(type="text", text=f"Error: {error}")]
 
         if not path.exists():

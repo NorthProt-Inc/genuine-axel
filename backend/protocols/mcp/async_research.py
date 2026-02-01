@@ -280,21 +280,11 @@ def dispatch_async_research(
         source=source
     )
 
-    return f"""✅ [SYSTEM] Research task `{task_id}` dispatched to background. DO NOT RETRY THIS TOOL.
+    return f"""Research task `{task_id}` started.
 
-**Status:** Background agent is working
-**Query:** {query[:100]}{'...' if len(query) > 100 else ''}
-**Engine:** Google Gemini
-
-🔴 **IMPORTANT FOR AI ASSISTANTS:**
-- This tool call was SUCCESSFUL
-- The research is running in the background
-- DO NOT call this tool again for the same query
-- DO NOT ask the user if you should retry
-- Results will be automatically saved to `storage/research/inbox/`
-- You can check `storage/research/log.md` for status
-
-Continue with other tasks. The background agent will complete this work independently."""
+Query: {query[:100]}{'...' if len(query) > 100 else ''}
+Results: storage/research/inbox/
+Log: storage/research/log.md"""
 
 async def run_research_sync(
     query: str,

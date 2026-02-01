@@ -44,7 +44,7 @@ BACKEND_ROOT = Path(__file__).parent.resolve()
 DATA_ROOT = PROJECT_ROOT / "data"
 
 WORKING_MEMORY_PATH = DATA_ROOT / "working_memory.json"
-SQLITE_MEMORY_PATH = DATA_ROOT / "sqlite_memory.db"
+SQLITE_MEMORY_PATH = DATA_ROOT / "sqlite" / "sqlite_memory.db"
 CHROMADB_PATH = DATA_ROOT / "chroma_db"
 KNOWLEDGE_GRAPH_PATH = DATA_ROOT / "knowledge_graph.json"
 
@@ -135,3 +135,24 @@ MAX_MEMORY_CONTEXT_CHARS = {
 MAX_SEARCH_CONTEXT_CHARS = _get_int_env("MAX_SEARCH_CONTEXT_CHARS", 300_000)
 MAX_CODE_CONTEXT_CHARS = _get_int_env("MAX_CODE_CONTEXT_CHARS", 300_000)
 MAX_CODE_FILE_CHARS = _get_int_env("MAX_CODE_FILE_CHARS", 300_000)
+
+# Memory Decay 설정
+def _get_float_env(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        _logger.warning("Invalid float env", env=name, value=raw)
+        return default
+
+MEMORY_BASE_DECAY_RATE = _get_float_env("MEMORY_BASE_DECAY_RATE", 0.001)
+MEMORY_MIN_RETENTION = _get_float_env("MEMORY_MIN_RETENTION", 0.3)
+MEMORY_DECAY_DELETE_THRESHOLD = _get_float_env("MEMORY_DECAY_DELETE_THRESHOLD", 0.03)
+MEMORY_SIMILARITY_THRESHOLD = _get_float_env("MEMORY_SIMILARITY_THRESHOLD", 0.90)
+MEMORY_MIN_IMPORTANCE = _get_float_env("MEMORY_MIN_IMPORTANCE", 0.25)
+
+# 메시지 축약 설정
+MESSAGE_ARCHIVE_AFTER_DAYS = _get_int_env("MESSAGE_ARCHIVE_AFTER_DAYS", 7)
+MESSAGE_SUMMARY_MODEL = os.getenv("MESSAGE_SUMMARY_MODEL", "gemini-2.0-flash")

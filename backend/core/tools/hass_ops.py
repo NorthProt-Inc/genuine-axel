@@ -8,6 +8,7 @@ from enum import Enum
 import httpx
 from backend.core.logging import get_logger
 from backend.core.utils.http_pool import get_client
+from backend.core.utils.circuit_breaker import HASS_CIRCUIT, CircuitOpenError
 
 _log = get_logger("tools.hass")
 
@@ -146,6 +147,18 @@ async def _hass_api_call(
 ) -> HASSResult:
 
     _log.debug("HASS req", endpoint=endpoint, method=method)
+
+    # Check circuit breaker first
+    if not HASS_CIRCUIT.can_execute():
+        timeout_remaining = HASS_CIRCUIT.get_timeout_remaining()
+        HASS_CIRCUIT.record_rejected()
+        _log.warning("HASS circuit open", timeout_remaining=timeout_remaining)
+        return HASSResult(
+            success=False,
+            message="",
+            error=f"Home Assistant circuit breaker is OPEN. Retry after {timeout_remaining:.0f}s"
+        )
+
     hass_url, hass_token = _get_hass_credentials()
 
     if not hass_token:
@@ -176,13 +189,19 @@ async def _hass_api_call(
                 resp = await client.get(endpoint)
                 result = _process_response_httpx(resp, endpoint)
                 if result.success:
+                    HASS_CIRCUIT.record_success()
                     _log.info("HASS ok", endpoint=endpoint, method=method)
+                else:
+                    HASS_CIRCUIT.record_failure()
                 return result
             elif method.upper() == "POST":
                 resp = await client.post(endpoint, json=payload)
                 result = _process_response_httpx(resp, endpoint)
                 if result.success:
+                    HASS_CIRCUIT.record_success()
                     _log.info("HASS ok", endpoint=endpoint, method=method)
+                else:
+                    HASS_CIRCUIT.record_failure()
                 return result
             else:
                 _log.error("HASS fail", err=f"Unsupported method: {method}")
@@ -192,12 +211,15 @@ async def _hass_api_call(
                     error=f"Unsupported HTTP method: {method}"
                 )
         except httpx.TimeoutException:
+            HASS_CIRCUIT.record_failure()
             last_error = "Connection timeout - Home Assistant may be unreachable"
             _log.warning("HASS retry", endpoint=endpoint, attempt=attempt+1, err="timeout")
         except httpx.RequestError as e:
+            HASS_CIRCUIT.record_failure()
             last_error = f"Connection error: {str(e)}"
             _log.warning("HASS retry", endpoint=endpoint, attempt=attempt+1, err=str(e)[:100])
         except Exception as e:
+            HASS_CIRCUIT.record_failure()
             last_error = f"Unexpected error: {str(e)}"
             _log.warning("HASS retry", endpoint=endpoint, attempt=attempt+1, err=str(e)[:100])
 

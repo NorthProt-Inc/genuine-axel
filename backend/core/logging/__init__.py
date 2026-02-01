@@ -24,21 +24,17 @@ __all__ = [
 
     "get_logger",
     "StructuredLogger",
-
     "SmartFormatter",
     "PlainFormatter",
     "HumanReadableFormatter",
-
     "Colors",
     "MODULE_COLORS",
     "MODULE_ABBREV",
     "ABBREV",
     "abbreviate",
-
     "set_request_id",
     "reset_request_id",
     "get_request_id",
-
     "set_log_level",
     "logged",
     "error_monitor",
