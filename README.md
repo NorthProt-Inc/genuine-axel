@@ -51,24 +51,6 @@
 
 ## Core Components
 
-~~1. Chat Pipeline (`backend/core/chat_handler.py`)
-
-"Think -> Tool -> Speak"** 패턴의 단순화된 파이프라인.
-
-| Stage | Description |
-|-------|-------------|
-| **Context Optimizer** | 3-Tier 컨텍스트 구성 (mini/mid/pro) |
-| **MCP Tool Execution** | 도구 호출 및 결과 통합 |
-| **Response Stream** | SSE 기반 실시간 응답 |
-
-**3-Tier Context Configuration:**
-python
-TIER_CONFIG = {
-    "mini": {"working_turns": 50,  "max_context_chars": 500_000},
-    "mid":  {"working_turns": 100, "max_context_chars": 1_000_000},
-    "pro":  {"working_turns": 200, "max_context_chars": 2_000_000},
-}~~
-
 
 ### 2. Memory System (`backend/memory/`)
 
@@ -188,7 +170,7 @@ IoT 기기 직접 제어:
 | **MCP Protocol** | mcp>=1.0.0, sse-starlette>=2.0.0 |
 | **Search** | Playwright, DuckDuckGo, Tavily API |
 | **IoT** | Home Assistant REST API |
-| **Audio** | Deepgram Nova-3 (STT), OpenAI TTS |
+| **Audio** | Deepgram Nova-3 (STT), Local LLM TTS |
 | **Infrastructure** | Systemd, Pop!_OS |
 
 ---
@@ -363,8 +345,3 @@ Google Deep Research를 백그라운드에서 비동기 실행.
 ### Modular MCP Architecture
 MCP 도구를 `@register_tool` 데코레이터 기반 레지스트리로 구성. 도구 추가 시 자동 등록되며, 카테고리별 분리로 유지보수성 향상.
 
----
-
-## License
-
-NorthProt - All rights reserved.
