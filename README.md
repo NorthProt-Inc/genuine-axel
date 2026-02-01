@@ -51,9 +51,9 @@
 
 ## Core Components
 
-~~### 1. Chat Pipeline (`backend/core/chat_handler.py`)
+~~1. Chat Pipeline (`backend/core/chat_handler.py`)
 
-**"Think -> Tool -> Speak"** 패턴의 단순화된 파이프라인.
+"Think -> Tool -> Speak"** 패턴의 단순화된 파이프라인.
 
 | Stage | Description |
 |-------|-------------|
@@ -62,13 +62,13 @@
 | **Response Stream** | SSE 기반 실시간 응답 |
 
 **3-Tier Context Configuration:**
-```python
+python
 TIER_CONFIG = {
     "mini": {"working_turns": 50,  "max_context_chars": 500_000},
     "mid":  {"working_turns": 100, "max_context_chars": 1_000_000},
     "pro":  {"working_turns": 200, "max_context_chars": 2_000_000},
 }~~
-```
+
 
 ### 2. Memory System (`backend/memory/`)
 
