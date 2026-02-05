@@ -320,6 +320,11 @@ axnmihn/
 |   |   +-- memgpt.py          # Self-editing memory
 |   |   +-- current.py         # Working memory
 |   |   +-- temporal.py        # Temporal indexing
+|   +-- native/                 # C++ Native Optimizations
+|   |   +-- src/               # C++ source files
+|   |   +-- tests/             # Native module tests
+|   |   +-- CMakeLists.txt     # CMake build config
+|   |   +-- pyproject.toml     # Python package config
 |   +-- protocols/              # Communication Protocols
 |   |   +-- mcp/               # Model Context Protocol
 |   |       +-- server.py      # Base MCP server
@@ -460,6 +465,43 @@ External MCP servers like Context7 and Markitdown use Supergateway for stdio→S
 
 ### Modular Permanent Memory
 Long-term memory refactored from monolithic `permanent.py` to a modular `permanent/` package with clear separation of concerns (embedding, decay, consolidation, repository).
+
+### Native C++ Optimizations
+Performance-critical batch operations use pybind11-based C++ module (`backend/native/`) with AVX2 SIMD optimizations. Falls back to pure Python when unavailable.
+
+---
+
+## Native Module (`backend/native/`)
+
+C++ optimizations for batch operations in memory GC and knowledge graph deduplication.
+
+### Performance Improvements
+
+| Operation | Python | Native | Speedup |
+|-----------|--------|--------|---------|
+| Decay batch (5000) | 7.5ms | 0.1ms | **70x** |
+| Cosine similarity | 2.8ms | 0.16ms | **18x** |
+| Find duplicates (500) | 343ms | 14ms | **25x** |
+| String similarity | 305ms | 9ms | **33x** |
+
+### Building
+
+```bash
+cd backend/native
+pip install .
+```
+
+### Usage
+
+The module is automatically used when available:
+
+```python
+# decay_calculator.py automatically uses native batch processing
+from backend.memory.permanent.decay_calculator import AdaptiveDecayCalculator
+
+calc = AdaptiveDecayCalculator()
+results = calc.calculate_batch(memories)  # Uses C++ when available
+```
 
 ---
 

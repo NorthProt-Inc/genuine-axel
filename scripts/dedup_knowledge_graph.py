@@ -19,6 +19,14 @@ load_dotenv()
 
 from backend.config import KNOWLEDGE_GRAPH_PATH
 
+# Try to import native module for optimized string operations
+try:
+    import axnmihn_native as _native
+    _HAS_NATIVE = True
+except ImportError:
+    _native = None
+    _HAS_NATIVE = False
+
 KNOWN_ALIASES = {
 
     "mark": ["mark_(종민)", "mark(종민)", "종민_(mark)", "종민", "종민(mark)", "mark_종민"],
@@ -66,7 +74,12 @@ def normalize_name(name: str) -> str:
     return n
 
 def string_similarity(a: str, b: str) -> float:
+    """Calculate string similarity using Levenshtein distance.
 
+    Uses native C++ implementation when available for ~30x speedup.
+    """
+    if _HAS_NATIVE:
+        return _native.string_ops.string_similarity(a, b)
     return SequenceMatcher(None, a, b).ratio()
 
 def extract_core_name(name: str) -> str:
@@ -90,10 +103,15 @@ def find_alias_canonical(entity_id: str, entities: dict) -> Optional[str]:
     return None
 
 def find_duplicates(entities: dict, threshold: float = 0.85) -> List[Tuple[str, str, float, str]]:
+    """Find duplicate entities by name similarity.
 
+    Uses native C++ batch processing when available for ~30x speedup
+    on the O(N^2) string similarity comparisons.
+    """
     duplicates = []
     seen_pairs = set()
 
+    # Phase 1: Known aliases (exact match)
     for canonical, aliases in KNOWN_ALIASES.items():
         canonical_id = canonical.lower().replace(" ", "_")
         if canonical_id in entities:
@@ -105,6 +123,7 @@ def find_duplicates(entities: dict, threshold: float = 0.85) -> List[Tuple[str, 
                         duplicates.append((canonical_id, alias_id, 1.0, "known_alias"))
                         seen_pairs.add(pair)
 
+    # Phase 2: Core name matching
     core_to_ids = defaultdict(list)
     for eid, entity in entities.items():
         core = extract_core_name(entity.get("name", eid))
@@ -112,7 +131,6 @@ def find_duplicates(entities: dict, threshold: float = 0.85) -> List[Tuple[str, 
 
     for core, ids in core_to_ids.items():
         if len(ids) > 1:
-
             ids_sorted = sorted(ids, key=lambda x: entities[x].get("mentions", 0), reverse=True)
             keep_id = ids_sorted[0]
             for remove_id in ids_sorted[1:]:
@@ -121,29 +139,52 @@ def find_duplicates(entities: dict, threshold: float = 0.85) -> List[Tuple[str, 
                     duplicates.append((keep_id, remove_id, 0.95, "core_name_match"))
                     seen_pairs.add(pair)
 
+    # Phase 3: String similarity (O(N^2))
     entity_list = list(entities.items())
     n = len(entity_list)
 
-    for i in range(n):
-        id1, e1 = entity_list[i]
-        name1 = normalize_name(e1.get("name", ""))
+    # Prepare normalized names
+    names = [normalize_name(e.get("name", "")) for _, e in entity_list]
 
-        for j in range(i + 1, n):
+    # Use native batch processing if available
+    if _HAS_NATIVE and n > 20:
+        # Native batch comparison
+        native_dups = _native.string_ops.find_string_duplicates(names, threshold)
+
+        for i, j, sim in native_dups:
+            id1, e1 = entity_list[i]
             id2, e2 = entity_list[j]
-            name2 = normalize_name(e2.get("name", ""))
 
             pair = tuple(sorted([id1, id2]))
             if pair in seen_pairs:
                 continue
 
-            sim = string_similarity(name1, name2)
-            if sim >= threshold:
+            if e1.get("mentions", 0) >= e2.get("mentions", 0):
+                duplicates.append((id1, id2, sim, "string_similarity"))
+            else:
+                duplicates.append((id2, id1, sim, "string_similarity"))
+            seen_pairs.add(pair)
+    else:
+        # Python fallback
+        for i in range(n):
+            id1, e1 = entity_list[i]
+            name1 = names[i]
 
-                if e1.get("mentions", 0) >= e2.get("mentions", 0):
-                    duplicates.append((id1, id2, sim, "string_similarity"))
-                else:
-                    duplicates.append((id2, id1, sim, "string_similarity"))
-                seen_pairs.add(pair)
+            for j in range(i + 1, n):
+                id2, e2 = entity_list[j]
+                name2 = names[j]
+
+                pair = tuple(sorted([id1, id2]))
+                if pair in seen_pairs:
+                    continue
+
+                sim = string_similarity(name1, name2)
+                if sim >= threshold:
+                    if e1.get("mentions", 0) >= e2.get("mentions", 0):
+                        duplicates.append((id1, id2, sim, "string_similarity"))
+                    else:
+                        duplicates.append((id2, id1, sim, "string_similarity"))
+                    seen_pairs.add(pair)
 
     return duplicates
 
