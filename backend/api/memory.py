@@ -251,7 +251,7 @@ async def get_session_detail(session_id: str):
 
 @router.get("/memory/interaction-logs")
 async def get_interaction_logs(limit: int = 20):
-    """모델 라우팅 로그 조회 - 사용 모델, 티어, 지연시간, 토큰 수 통계"""
+    """Retrieve model routing logs with model, tier, latency, and token stats."""
     state = get_state()
 
     if not state.memory_manager or not state.memory_manager.session_archive:
@@ -267,7 +267,7 @@ async def get_interaction_logs(limit: int = 20):
 
 @router.get("/memory/interaction-stats")
 async def get_interaction_stats():
-    """모델별/티어별 사용 통계 요약"""
+    """Get usage statistics summary by model and tier."""
     state = get_state()
 
     if not state.memory_manager or not state.memory_manager.session_archive:

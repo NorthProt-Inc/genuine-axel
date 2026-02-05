@@ -9,7 +9,10 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 APP_VERSION = os.getenv("AXNMIHN_VERSION", "1.0")
 
-MODEL_NAME = os.getenv("LLM_MODEL", "gemini-3-flash-preview")
+DEFAULT_GEMINI_MODEL = os.getenv("DEFAULT_GEMINI_MODEL", "gemini-3-flash-preview")
+DEFAULT_THINKING_LEVEL = "high"
+
+MODEL_NAME = DEFAULT_GEMINI_MODEL
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-001")
 
 SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "tavily")
@@ -26,7 +29,11 @@ AXNMIHN_API_KEY = os.getenv("AXNMIHN_API_KEY") or os.getenv("API_KEY")
 CORS_ALLOW_ORIGINS = os.getenv("CORS_ALLOW_ORIGINS", "")
 
 def get_cors_origins() -> list:
+    """Get allowed CORS origins from environment or defaults.
 
+    Returns:
+        List of allowed origin URLs
+    """
     if CORS_ALLOW_ORIGINS:
         return [origin.strip() for origin in CORS_ALLOW_ORIGINS.split(",") if origin.strip()]
     return [
@@ -63,7 +70,7 @@ SYSTEM_PROMPT_FILE = str(PERSONA_PATH)
 LOGS_DIR = PROJECT_ROOT / "logs"
 
 def ensure_data_directories() -> None:
-
+    """Create required data directories if they don't exist."""
     directories = [
         DATA_ROOT,
         CHROMADB_PATH,
@@ -85,7 +92,18 @@ ALLOWED_TEXT_EXTENSIONS = ['.py', '.js', '.json', '.txt', '.md', '.html', '.css'
 ALLOWED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
 
 def _get_size_bytes(bytes_env: str, mb_env: str, default_mb: int) -> int:
+    """Get size in bytes from environment variable.
 
+    Checks bytes_env first, then mb_env (converted to bytes).
+
+    Args:
+        bytes_env: Environment variable name for bytes value
+        mb_env: Environment variable name for megabytes value
+        default_mb: Default size in megabytes if neither env is set
+
+    Returns:
+        Size in bytes
+    """
     raw_bytes = os.getenv(bytes_env)
     if raw_bytes:
         try:
@@ -105,6 +123,15 @@ MAX_AUDIO_BYTES = _get_size_bytes("MAX_AUDIO_BYTES", "MAX_AUDIO_MB", 25)
 MAX_ATTACHMENT_BYTES = _get_size_bytes("MAX_ATTACHMENT_BYTES", "MAX_ATTACHMENT_MB", 25)
 
 def _get_int_env(name: str, default: int) -> int:
+    """Get integer value from environment variable.
+
+    Args:
+        name: Environment variable name
+        default: Default value if not set or invalid
+
+    Returns:
+        Integer value from env or default
+    """
     raw = os.getenv(name)
     if raw is None:
         return default
@@ -136,8 +163,21 @@ MAX_SEARCH_CONTEXT_CHARS = _get_int_env("MAX_SEARCH_CONTEXT_CHARS", 300_000)
 MAX_CODE_CONTEXT_CHARS = _get_int_env("MAX_CODE_CONTEXT_CHARS", 300_000)
 MAX_CODE_FILE_CHARS = _get_int_env("MAX_CODE_FILE_CHARS", 300_000)
 
-# Memory Decay 설정
+# Context building configuration
+CONTEXT_WORKING_TURNS = _get_int_env("CONTEXT_WORKING_TURNS", 30)
+CONTEXT_FULL_TURNS = _get_int_env("CONTEXT_FULL_TURNS", 10)
+CONTEXT_MAX_CHARS = _get_int_env("CONTEXT_MAX_CHARS", 500_000)
+
 def _get_float_env(name: str, default: float) -> float:
+    """Get float value from environment variable.
+
+    Args:
+        name: Environment variable name
+        default: Default value if not set or invalid
+
+    Returns:
+        Float value from env or default
+    """
     raw = os.getenv(name)
     if raw is None:
         return default
@@ -155,4 +195,44 @@ MEMORY_MIN_IMPORTANCE = _get_float_env("MEMORY_MIN_IMPORTANCE", 0.25)
 
 # 메시지 축약 설정
 MESSAGE_ARCHIVE_AFTER_DAYS = _get_int_env("MESSAGE_ARCHIVE_AFTER_DAYS", 7)
-MESSAGE_SUMMARY_MODEL = os.getenv("MESSAGE_SUMMARY_MODEL", "gemini-2.0-flash")
+MESSAGE_SUMMARY_MODEL = DEFAULT_GEMINI_MODEL
+
+# =============================================================================
+# Research & Web Scraping
+# =============================================================================
+RESEARCH_PAGE_TIMEOUT_MS = _get_int_env("RESEARCH_PAGE_TIMEOUT_MS", 15000)
+RESEARCH_NAVIGATION_TIMEOUT_MS = _get_int_env("RESEARCH_NAVIGATION_TIMEOUT_MS", 30000)
+RESEARCH_MAX_CONTENT_LENGTH = _get_int_env("RESEARCH_MAX_CONTENT_LENGTH", 75000)
+RESEARCH_POLL_INTERVAL = _get_int_env("RESEARCH_POLL_INTERVAL", 30)
+RESEARCH_MAX_POLL_TIME = _get_int_env("RESEARCH_MAX_POLL_TIME", 1800)
+
+# =============================================================================
+# MCP Tool Execution
+# =============================================================================
+MCP_MAX_TOOL_RETRIES = _get_int_env("MCP_MAX_TOOL_RETRIES", 3)
+MCP_TOOL_RETRY_DELAY = _get_float_env("MCP_TOOL_RETRY_DELAY", 0.5)
+MCP_MAX_TOOLS = _get_int_env("MCP_MAX_TOOLS", 13)
+
+# =============================================================================
+# Home Assistant
+# =============================================================================
+HASS_TIMEOUT = _get_float_env("HASS_TIMEOUT", 10.0)
+HASS_MAX_RETRIES = _get_int_env("HASS_MAX_RETRIES", 2)
+
+# =============================================================================
+# Opus Bridge
+# =============================================================================
+OPUS_DEFAULT_MODEL = os.getenv("OPUS_DEFAULT_MODEL", "opus")
+OPUS_COMMAND_TIMEOUT = _get_int_env("OPUS_COMMAND_TIMEOUT", 600)
+
+# =============================================================================
+# Context Building
+# =============================================================================
+CONTEXT_SESSION_COUNT = _get_int_env("CONTEXT_SESSION_COUNT", 30)
+CONTEXT_SESSION_BUDGET = _get_int_env("CONTEXT_SESSION_BUDGET", 60000)
+CONTEXT_SQL_PERSIST_TURNS = _get_int_env("CONTEXT_SQL_PERSIST_TURNS", 10)
+
+# =============================================================================
+# Memory Extraction
+# =============================================================================
+MEMORY_EXTRACTION_TIMEOUT = _get_int_env("MEMORY_EXTRACTION_TIMEOUT", 120)

@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Set, Tuple, Any
 from datetime import datetime
 from collections import defaultdict
 from backend.core.logging import get_logger
-from backend.config import KNOWLEDGE_GRAPH_PATH
+from backend.config import KNOWLEDGE_GRAPH_PATH, MEMORY_EXTRACTION_TIMEOUT
 from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver
 
 _log = get_logger("memory.graph")
@@ -58,7 +58,14 @@ class KnowledgeGraph:
         self._load()
 
     def add_entity(self, entity: Entity) -> str:
+        """Add or update an entity in the graph.
 
+        Args:
+            entity: Entity to add
+
+        Returns:
+            Entity ID
+        """
         if entity.id in self.entities:
 
             existing = self.entities[entity.id]
@@ -73,7 +80,14 @@ class KnowledgeGraph:
         return entity.id
 
     def add_relation(self, relation: Relation) -> str:
+        """Add a relation between two entities.
 
+        Args:
+            relation: Relation to add
+
+        Returns:
+            Relation ID or empty string if entities not found
+        """
         if relation.source_id not in self.entities:
             _log.warning("Source entity not found", id=relation.source_id)
             return ""
@@ -95,11 +109,11 @@ class KnowledgeGraph:
         return relation.id
 
     def get_entity(self, entity_id: str) -> Optional[Entity]:
-
+        """Get entity by ID."""
         return self.entities.get(entity_id)
 
     def find_entities_by_name(self, name: str) -> List[Entity]:
-
+        """Find entities by partial name match (case-insensitive)."""
         name_lower = name.lower()
         return [
             e for e in self.entities.values()
@@ -107,14 +121,14 @@ class KnowledgeGraph:
         ]
 
     def find_entities_by_type(self, entity_type: str) -> List[Entity]:
-
+        """Find all entities of a specific type."""
         return [
             e for e in self.entities.values()
             if e.entity_type == entity_type
         ]
 
     def get_neighbors(self, entity_id: str, depth: int = 1) -> Set[str]:
-
+        """Get neighboring entity IDs up to specified depth."""
         if entity_id not in self.entities:
             return set()
 
@@ -134,14 +148,14 @@ class KnowledgeGraph:
         return visited
 
     def get_relations_for_entity(self, entity_id: str) -> List[Relation]:
-
+        """Get all relations involving an entity."""
         return [
             r for r in self.relations.values()
             if r.source_id == entity_id or r.target_id == entity_id
         ]
 
     def find_path(self, source_id: str, target_id: str, max_depth: int = 3) -> List[str]:
-
+        """Find shortest path between two entities using BFS."""
         if source_id not in self.entities or target_id not in self.entities:
             return []
 
@@ -168,7 +182,7 @@ class KnowledgeGraph:
         return []
 
     def get_stats(self) -> Dict[str, Any]:
-
+        """Get graph statistics including entity counts by type."""
         type_counts = defaultdict(int)
         for e in self.entities.values():
             type_counts[e.entity_type] += 1
@@ -181,7 +195,7 @@ class KnowledgeGraph:
         }
 
     def save(self):
-
+        """Persist graph to JSON file."""
         import os
         os.makedirs(os.path.dirname(self.persist_path), exist_ok=True)
 
@@ -217,7 +231,7 @@ class KnowledgeGraph:
         _log.debug("MEM graph_save", entities=len(self.entities), rels=len(self.relations))
 
     def _load(self):
-
+        """Load graph from JSON file if exists."""
         import os
         if not os.path.exists(self.persist_path):
             return
@@ -246,7 +260,7 @@ class GraphRAG:
         self.model = model
         self.graph = graph or KnowledgeGraph()
 
-    EXTRACTION_TIMEOUT_SECONDS = 120
+    EXTRACTION_TIMEOUT_SECONDS = MEMORY_EXTRACTION_TIMEOUT
 
     async def extract_and_store(
         self,
@@ -255,7 +269,17 @@ class GraphRAG:
         importance_threshold: float = 0.6,
         timeout_seconds: float = None
     ) -> Dict[str, Any]:
+        """Extract entities and relations from text using LLM.
 
+        Args:
+            text: Source text for extraction
+            source: Source identifier
+            importance_threshold: Minimum importance to include
+            timeout_seconds: Extraction timeout
+
+        Returns:
+            Dict with added entity/relation counts
+        """
         if not self.model:
             return {"error": "Model not available", "entities_added": 0, "relations_added": 0}
 
@@ -369,7 +393,16 @@ JSON 응답만 (설명 없이):
         max_entities: int = 5,
         max_depth: int = 2
     ) -> GraphQueryResult:
+        """Query graph for relevant entities and relations.
 
+        Args:
+            query: Natural language query
+            max_entities: Maximum entities to return
+            max_depth: Graph traversal depth
+
+        Returns:
+            GraphQueryResult with entities, relations, and context
+        """
         if not self.model:
             return GraphQueryResult(
                 entities=[],
@@ -438,7 +471,7 @@ JSON 응답만 (설명 없이):
         )
 
     async def _extract_query_entities(self, query: str) -> List[str]:
-
+        """Extract entity names from query using LLM."""
         prompt = f"""다음 질문에서 핵심 엔티티(이름, 개념, 도구 등)를 추출하세요.
 
 질문: "{query}"
@@ -476,7 +509,7 @@ JSON 배열로 응답 (엔티티 이름만):
         relations: List[Relation],
         paths: List[List[str]]
     ) -> str:
-
+        """Format graph data as human-readable context string."""
         parts = []
 
         if entities:
@@ -507,7 +540,16 @@ JSON 배열로 응답 (엔티티 이름만):
         max_entities: int = 5,
         max_depth: int = 2
     ) -> GraphQueryResult:
+        """Synchronous graph query using keyword matching.
 
+        Args:
+            query: Natural language query
+            max_entities: Maximum entities to return
+            max_depth: Graph traversal depth
+
+        Returns:
+            GraphQueryResult with entities, relations, and context
+        """
         words = query.lower().split()
         query_entities = []
 
@@ -557,7 +599,7 @@ JSON 배열로 응답 (엔티티 이름만):
         )
 
     def get_stats(self) -> Dict[str, Any]:
-
+        """Get underlying knowledge graph statistics."""
         return self.graph.get_stats()
 
 __all__ = [

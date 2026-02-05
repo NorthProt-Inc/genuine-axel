@@ -169,8 +169,9 @@ def find_dead_entities(entities: dict, relations: dict, min_age_days: int = 7) -
                 created = datetime.fromisoformat(created_str)
                 if created < cutoff:
                     dead.append(eid)
-            except:
-                pass
+            except ValueError:
+                # 파싱 불가 날짜 → 오래된 것으로 간주
+                dead.append(eid)
 
     return dead
 
@@ -220,8 +221,8 @@ def recalculate_importance(entities: dict, relations: dict) -> dict:
                 last_accessed = datetime.fromisoformat(last_accessed_str)
                 days_ago = (now - last_accessed).days
                 recency_factor = max(0.5, 1.0 - (days_ago / 30) * 0.5)
-            except:
-                pass
+            except (ValueError, TypeError):
+                recency_factor = 0.5  # 명시적 기본값
 
         mention_score = min(1.0, mentions / 100)
         relation_score = min(1.0, total_degree / 20)

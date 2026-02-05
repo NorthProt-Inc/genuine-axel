@@ -1,26 +1,26 @@
 # Logging System
 
-Axnmihn 프로젝트의 구조화된 로깅 시스템 문서입니다.
+Documentation for the structured logging system in the axnmihn project.
 
 ---
 
-## 개요
+## Overview
 
-이 로깅 시스템은 깔끔하고 읽기 쉬운 로그 출력을 제공합니다:
-- 모듈별 컬러 출력
-- 심각도 기반 색상
-- 자동 축약어 변환
-- `@logged` 데코레이터로 함수 진입/종료 자동 로깅
-- 구조화된 key=value 포맷
-- 요청 추적 및 경과 시간 표시
-- 파일 로테이션 (10MB, 5개 백업)
+This logging system provides clean and readable log output:
+- Module-specific color output
+- Severity-based colors
+- Automatic abbreviation conversion
+- `@logged` decorator for automatic function entry/exit logging
+- Structured key=value format
+- Request tracking with elapsed time display
+- File rotation (10MB, 5 backups)
 
 ---
 
-## 모듈 컬러 레퍼런스
+## Module Color Reference
 
-| 모듈 | 축약어 | 색상 | ANSI 코드 |
-|------|--------|------|-----------|
+| Module | Abbreviation | Color | ANSI Code |
+|--------|--------------|-------|-----------|
 | api | API | Bright Blue | `\033[94m` |
 | core | COR | Cyan | `\033[96m` |
 | memory | MEM | Light Magenta | `\033[95m` |
@@ -33,20 +33,20 @@ Axnmihn 프로젝트의 구조화된 로깅 시스템 문서입니다.
 
 ---
 
-## 심각도 레벨
+## Severity Levels
 
-| 레벨 | 설명 | 사용 시점 |
-|------|------|----------|
-| **DEBUG** | 상세 진단 정보 | 함수 진입/종료, 내부 상태 확인 |
-| **INFO** | 정상 작동 | 요청/응답, 중요 이벤트 |
-| **WARNING** | 복구 가능한 문제 | 재시도, 폴백 처리 |
-| **ERROR** | 주의 필요한 실패 | 예외 발생, 실패한 작업 |
-| **CRITICAL** | 시스템 장애 | 서비스 중단, 치명적 오류 |
+| Level | Description | When to Use |
+|-------|-------------|-------------|
+| **DEBUG** | Detailed diagnostic information | Function entry/exit, internal state inspection |
+| **INFO** | Normal operation | Requests/responses, important events |
+| **WARNING** | Recoverable issues | Retries, fallback handling |
+| **ERROR** | Failures requiring attention | Exceptions, failed operations |
+| **CRITICAL** | System failures | Service outages, fatal errors |
 
-### 심각도별 색상
+### Severity Colors
 
-| 레벨 | 색상 | ANSI 코드 |
-|------|------|-----------|
+| Level | Color | ANSI Code |
+|-------|-------|-----------|
 | DEBUG | Cyan | `\033[36m` |
 | INFO | Green | `\033[32m` |
 | WARNING | Yellow | `\033[33m` |
@@ -55,14 +55,14 @@ Axnmihn 프로젝트의 구조화된 로깅 시스템 문서입니다.
 
 ---
 
-## 축약어 사전
+## Abbreviation Dictionary
 
-로그 메시지를 간결하게 유지하기 위해 다음 축약어가 자동으로 적용됩니다:
+The following abbreviations are automatically applied to keep log messages concise:
 
-### 일반 용어
+### General Terms
 
-| 원문 | 축약어 |
-|------|--------|
+| Original | Abbreviation |
+|----------|--------------|
 | request | req |
 | response | res |
 | message | msg |
@@ -86,10 +86,10 @@ Axnmihn 프로젝트의 구조화된 로깅 시스템 문서입니다.
 | device | dev |
 | assistant | asst |
 
-### 동작 관련
+### Action-Related
 
-| 원문 | 축약어 |
-|------|--------|
+| Original | Abbreviation |
+|----------|--------------|
 | received | recv |
 | sent | sent |
 | success | ok |
@@ -100,10 +100,10 @@ Axnmihn 프로젝트의 구조화된 로깅 시스템 문서입니다.
 | started | start |
 | finished | fin |
 
-### 기술 용어
+### Technical Terms
 
-| 원문 | 축약어 |
-|------|--------|
+| Original | Abbreviation |
+|----------|--------------|
 | database | db |
 | query | qry |
 | result | res |
@@ -116,23 +116,23 @@ Axnmihn 프로젝트의 구조화된 로깅 시스템 문서입니다.
 
 ---
 
-## 사용 예시
+## Usage Examples
 
-### 기본 로거 사용
+### Basic Logger Usage
 
 ```python
 from backend.core.logging.logging import get_logger
 
 logger = get_logger("api.chat")
 
-# 기본 로깅
+# Basic logging
 logger.info("Server started", port=8000, env="prod")
 logger.debug("Processing request", user_id="abc123")
 logger.warning("Rate limit approaching", remaining=10)
 logger.error("Connection failed", host="db.local", retry=3)
 ```
 
-### API 엔드포인트 로깅
+### API Endpoint Logging
 
 ```python
 from backend.core.logging.logging import get_logger
@@ -156,7 +156,7 @@ async def chat_endpoint(request: ChatRequest):
         raise
 ```
 
-### Core 함수 로깅
+### Core Function Logging
 
 ```python
 from backend.core.logging.logging import get_logger
@@ -168,7 +168,7 @@ async def handle_message(message: str, context: dict):
                  length=len(message),
                  context_keys=list(context.keys()))
 
-    # 처리 로직
+    # Processing logic
     result = await generate_response(message, context)
 
     logger.info("Response generated",
@@ -177,7 +177,7 @@ async def handle_message(message: str, context: dict):
     return result
 ```
 
-### Tool 함수 로깅
+### Tool Function Logging
 
 ```python
 from backend.core.logging.logging import get_logger
@@ -201,105 +201,105 @@ async def control_device(entity_id: str, action: str):
         raise
 ```
 
-### @logged 데코레이터 사용
+### @logged Decorator Usage
 
 ```python
 from backend.core.logging.logging import logged
 
-# 기본 사용 (진입/종료 로그)
+# Basic usage (entry/exit logs)
 @logged()
 async def my_function(x, y):
     return x + y
 
-# 인자와 결과값 포함
+# Include arguments and result
 @logged(log_args=True, log_result=True)
 def compute(data):
     return process(data)
 
-# 진입 로그만
+# Entry log only
 @logged(exit=False)
 async def fire_and_forget(task):
     await background_task(task)
 
-# INFO 레벨로 로깅
+# Log at INFO level
 @logged(level=logging.INFO, log_args=True)
 async def important_operation(config: dict):
     return await execute(config)
 ```
 
-#### @logged 데코레이터 출력 예시
+#### @logged Decorator Output Examples
 
 ```
 14:32:01.234 DEBUG [COR|chat_hand…] → my_function
 14:32:01.567 DEBUG [COR|chat_hand…] ← my_function
 
-# log_args=True 사용 시
+# With log_args=True
 14:32:01.234 DEBUG [COR|chat_hand…] → compute │ data=[3 items]
 14:32:01.567 DEBUG [COR|chat_hand…] ← compute │ result=42
 
-# 예외 발생 시
+# On exception
 14:32:01.234 DEBUG [COR|chat_hand…] → my_function
 14:32:01.567 ERROR [COR|chat_hand…] ✗ my_function │ error=Connection refused
 ```
 
 ---
 
-## 설정
+## Configuration
 
-### 환경 변수
+### Environment Variables
 
-| 변수명 | 설명 | 기본값 | 예시 |
-|--------|------|--------|------|
-| `LOG_LEVEL` | 로그 레벨 설정 | `INFO` | `DEBUG`, `WARNING`, `ERROR` |
-| `LOG_JSON` | JSON 로그 활성화 | `false` | `1`, `true`, `yes` |
-| `NO_COLOR` | 컬러 출력 비활성화 | 미설정 | 아무 값 |
+| Variable | Description | Default | Example |
+|----------|-------------|---------|---------|
+| `LOG_LEVEL` | Log level setting | `INFO` | `DEBUG`, `WARNING`, `ERROR` |
+| `LOG_JSON` | Enable JSON logging | `false` | `1`, `true`, `yes` |
+| `NO_COLOR` | Disable color output | unset | any value |
 
-### 사용 예시
+### Usage Examples
 
 ```bash
-# 디버그 레벨로 실행
+# Run with debug level
 LOG_LEVEL=DEBUG python -m backend.app
 
-# JSON 로그 활성화
+# Enable JSON logging
 LOG_JSON=true python -m backend.app
 
-# 컬러 비활성화 (파이프라인 사용 시)
+# Disable color (for pipeline use)
 NO_COLOR=1 python -m backend.app | tee output.log
 ```
 
-### 동적 레벨 변경
+### Dynamic Level Change
 
 ```python
 from backend.core.logging.logging import set_log_level
 
-# 런타임에 로그 레벨 변경
-set_log_level("DEBUG")  # 상세 로그 활성화
-set_log_level("WARNING")  # 경고 이상만 표시
+# Change log level at runtime
+set_log_level("DEBUG")  # Enable detailed logs
+set_log_level("WARNING")  # Show warnings and above only
 ```
 
 ---
 
-## 출력 포맷
+## Output Format
 
-### 콘솔 출력 포맷
+### Console Output Format
 
 ```
 HH:MM:SS.mmm LVL [MOD|submod     ] msg │ k=v k2=v2
 ```
 
-#### 포맷 구성 요소
+#### Format Components
 
-| 구성 요소 | 설명 | 예시 |
-|-----------|------|------|
-| `HH:MM:SS.mmm` | 타임스탬프 (밀리초 포함) | `14:32:01.234` |
-| `LVL` | 심각도 레벨 (5자) | `DEBUG`, ` INFO`, ` WARN`, `ERROR`, `CRIT!` |
-| `MOD` | 모듈 축약어 (3자) | `API`, `COR`, `MEM` |
-| `submod` | 서브모듈 이름 (최대 9자) | `chat`, `handler` |
-| `msg` | 로그 메시지 | `Server started` |
-| `│` | 구분자 | - |
-| `k=v` | 키-값 쌍 | `port=8000 env=prod` |
+| Component | Description | Example |
+|-----------|-------------|---------|
+| `HH:MM:SS.mmm` | Timestamp (with milliseconds) | `14:32:01.234` |
+| `LVL` | Severity level (5 chars) | `DEBUG`, ` INFO`, ` WARN`, `ERROR`, `CRIT!` |
+| `MOD` | Module abbreviation (3 chars) | `API`, `COR`, `MEM` |
+| `submod` | Submodule name (max 9 chars) | `chat`, `handler` |
+| `msg` | Log message | `Server started` |
+| `│` | Separator | - |
+| `k=v` | Key-value pairs | `port=8000 env=prod` |
 
-### 실제 출력 예시
+### Actual Output Examples
 
 ```
 14:32:01.234  INFO [API|chat       ] Chat req recv │ sess=abc12345 mdl=gemini-3
@@ -309,17 +309,17 @@ HH:MM:SS.mmm LVL [MOD|submod     ] msg │ k=v k2=v2
 14:32:02.345 ERROR [API|chat       ] Request fail │ err=timeout
 ```
 
-### 파일 로그 포맷
+### File Log Format
 
-파일 로그는 색상 없이 더 상세한 타임스탬프를 사용합니다:
+File logs use a more detailed timestamp without colors:
 
 ```
 2024-01-15 14:32:01.234 INFO    [abc12345│api.chat      ] Chat req recv │ sess=abc12345 mdl=gemini-3
 ```
 
-### JSON 로그 포맷
+### JSON Log Format
 
-`LOG_JSON=true` 설정 시 `logs/axnmihn.jsonl` 파일에 JSONL 형식으로 저장됩니다:
+When `LOG_JSON=true`, logs are saved to `logs/axnmihn.jsonl` in JSONL format:
 
 ```json
 {"ts":"2024-01-15T14:32:01.234567-08:00","level":"INFO","logger":"api.chat","msg":"Chat req recv","req":"abc12345","sess":"abc12345","mdl":"gemini-2"}
@@ -327,55 +327,55 @@ HH:MM:SS.mmm LVL [MOD|submod     ] msg │ k=v k2=v2
 
 ---
 
-## 값 포맷팅
+## Value Formatting
 
-로그 값은 가독성을 위해 자동으로 포맷됩니다:
+Log values are automatically formatted for readability:
 
-| 타입 | 포맷 | 예시 |
-|------|------|------|
+| Type | Format | Example |
+|------|--------|---------|
 | `None` | `null` | `value=null` |
 | `bool` | `yes`/`no` | `enabled=yes` |
-| `int`/`float` | 그대로 | `count=42`, `ratio=0.95` |
-| `list` (0-3개) | 전체 표시 | `items=[a, b, c]` |
-| `list` (4개+) | 개수 표시 | `items=[15 items]` |
-| `dict` | 키 개수 | `config={5 keys}` |
-| `str` (60자+) | 잘라서 표시 | `content=Lorem ipsum dolor sit amet...` |
+| `int`/`float` | as-is | `count=42`, `ratio=0.95` |
+| `list` (0-3 items) | full display | `items=[a, b, c]` |
+| `list` (4+ items) | count display | `items=[15 items]` |
+| `dict` | key count | `config={5 keys}` |
+| `str` (60+ chars) | truncated | `content=Lorem ipsum dolor sit amet...` |
 
 ---
 
-## 특수 키 하이라이트
+## Special Key Highlighting
 
-특정 키는 시각적 구분을 위해 다른 색상으로 표시됩니다:
+Certain keys are displayed in different colors for visual distinction:
 
-| 키 | 색상 | 용도 |
-|----|------|------|
-| `model`, `tier`, `provider` | Light Magenta | LLM 관련 정보 |
-| `tokens`, `memories`, `working`, `longterm` | Light Cyan | 메모리 관련 정보 |
-| `session` | Light Green | 세션 식별자 |
-| `latency` | Yellow | 성능 메트릭 |
-| `error` | Red | 에러 정보 |
+| Key | Color | Purpose |
+|-----|-------|---------|
+| `model`, `tier`, `provider` | Light Magenta | LLM-related information |
+| `tokens`, `memories`, `working`, `longterm` | Light Cyan | Memory-related information |
+| `session` | Light Green | Session identifier |
+| `latency` | Yellow | Performance metrics |
+| `error` | Red | Error information |
 
 ---
 
-## 요청 추적
+## Request Tracking
 
-요청 ID를 설정하면 해당 요청의 모든 로그에 자동으로 포함됩니다:
+When a request ID is set, it's automatically included in all logs for that request:
 
 ```python
 from backend.core.logging.logging import set_request_id, reset_request_id
 
-# 요청 시작 시
+# At request start
 token = set_request_id("req-abc123")
 
 try:
-    # 이 블록 내의 모든 로그에 request ID가 포함됨
+    # All logs within this block include the request ID
     await process_request()
 finally:
-    # 요청 종료 시 리셋
+    # Reset at request end
     reset_request_id(token)
 ```
 
-경과 시간은 `request_tracker`가 활성화된 경우 자동으로 표시됩니다:
+Elapsed time is automatically displayed when `request_tracker` is active:
 
 ```
 14:32:01.234  INFO [API|chat       ] Processing │ +1.2s
@@ -384,99 +384,99 @@ finally:
 
 ---
 
-## 파일 구조
+## File Structure
 
 ```
 backend/
 └── core/
     └── logging/
-        └── logging.py     # 메인 로깅 모듈
+        └── logging.py     # Main logging module
 
 logs/
-├── axnmihn.log           # 일반 텍스트 로그 (로테이션)
-└── axnmihn.jsonl         # JSON 로그 (LOG_JSON=true 시)
+├── axnmihn.log           # Plain text log (rotated)
+└── axnmihn.jsonl         # JSON log (when LOG_JSON=true)
 ```
 
 ---
 
-## 모범 사례
+## Best Practices
 
-### 1. 적절한 로그 레벨 선택
+### 1. Choose Appropriate Log Levels
 
 ```python
-# DEBUG: 개발/디버깅용 상세 정보
+# DEBUG: Detailed information for development/debugging
 logger.debug("Cache lookup", key=cache_key, hit=cache_hit)
 
-# INFO: 운영 상태 파악에 필요한 정보
+# INFO: Information needed for operational awareness
 logger.info("Request processed", duration=elapsed_ms)
 
-# WARNING: 주의가 필요하지만 서비스는 정상
+# WARNING: Attention needed but service is normal
 logger.warning("Retry attempt", attempt=3, max=5)
 
-# ERROR: 실패했지만 서비스는 계속 가능
+# ERROR: Failed but service can continue
 logger.error("API call failed", service="hass", error=str(e))
 
-# CRITICAL: 서비스 중단 수준의 문제
+# CRITICAL: Service outage level issues
 logger.critical("Database connection lost")
 ```
 
-### 2. 구조화된 데이터 활용
+### 2. Use Structured Data
 
 ```python
-# 좋은 예 - 구조화된 키-값
+# Good - structured key-value
 logger.info("User action",
             user_id=user.id,
             action="login",
             ip=request.client.host)
 
-# 피해야 할 예 - 문자열 포맷팅
+# Avoid - string formatting
 logger.info(f"User {user.id} logged in from {request.client.host}")
 ```
 
-### 3. 민감 정보 제외
+### 3. Exclude Sensitive Information
 
 ```python
-# 좋은 예 - 토큰 마스킹
+# Good - token masking
 logger.debug("Auth request", token=api_key[:8] + "...")
 
-# 피해야 할 예 - 전체 토큰 노출
-logger.debug("Auth request", token=api_key)  # 위험!
+# Avoid - full token exposure
+logger.debug("Auth request", token=api_key)  # Dangerous!
 ```
 
-### 4. 예외 로깅
+### 4. Exception Logging
 
 ```python
 try:
     await risky_operation()
 except Exception as e:
-    # exception()은 스택 트레이스 포함
+    # exception() includes stack trace
     logger.exception("Operation failed", operation="risky")
 ```
 
 ---
 
-## 문제 해결
+## Troubleshooting
 
-### 로그가 출력되지 않는 경우
+### Logs Not Appearing
 
-1. `LOG_LEVEL` 확인: `LOG_LEVEL=DEBUG`로 설정
-2. 핸들러 확인: 로거가 올바르게 초기화되었는지 확인
+1. Check `LOG_LEVEL`: Set `LOG_LEVEL=DEBUG`
+2. Verify handlers: Ensure logger is properly initialized
 
-### 색상이 표시되지 않는 경우
+### Colors Not Displaying
 
-1. `NO_COLOR` 환경 변수 확인
-2. 터미널이 ANSI 색상을 지원하는지 확인
-3. 출력이 파일로 리다이렉트되면 자동으로 색상 비활성화
+1. Check `NO_COLOR` environment variable
+2. Verify terminal supports ANSI colors
+3. Colors auto-disable when output is redirected to file
 
-### 파일 로그가 생성되지 않는 경우
+### File Logs Not Created
 
-1. `logs/` 디렉토리 존재 확인
-2. 쓰기 권한 확인
-3. 디스크 공간 확인
+1. Verify `logs/` directory exists
+2. Check write permissions
+3. Check disk space
 
 ---
 
-## 변경 이력
+## Changelog
 
-- **v2.0**: 모듈별 컬러, 축약어 시스템, @logged 데코레이터 추가
-- **v1.0**: 초기 구조화 로깅 시스템
+- **v2.0**: Added module colors, abbreviation system, @logged decorator
+- **v1.0**: Initial structured logging system

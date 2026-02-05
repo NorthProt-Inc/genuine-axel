@@ -83,7 +83,16 @@ class MemoryManager:
     ]
 
     def add_message(self, role: str, content: str, emotional_context: str = "neutral"):
+        """Add a message to working memory with immediate SQL persistence.
 
+        Args:
+            role: Message role (user/assistant)
+            content: Message content
+            emotional_context: Emotional tone
+
+        Returns:
+            TimestampedMessage or None if filtered
+        """
         if any(pattern in content for pattern in self.LOG_PATTERNS):
             _log.debug("Filtered log pattern from memory")
             return None
@@ -107,14 +116,21 @@ class MemoryManager:
             return msg
 
     def get_working_context(self) -> str:
-
+        """Get current working memory context as formatted string."""
         return self.working.get_context()
 
     def build_smart_context(
         self,
         current_query: str
     ) -> str:
+        """Build intelligent context from all memory sources.
 
+        Args:
+            current_query: Current user query for relevance scoring
+
+        Returns:
+            Formatted context string with time, working, long-term, and graph data
+        """
         return self._build_smart_context_sync(current_query)
 
     def _build_smart_context_sync(self, current_query: str) -> str:
@@ -325,7 +341,7 @@ class MemoryManager:
         return context_text
 
     def _build_time_context(self) -> str:
-
+        """Build time-aware context with current time and session info."""
         now = datetime.now(VANCOUVER_TZ)
         lines = []
 
@@ -353,7 +369,16 @@ class MemoryManager:
         summary_timeout_seconds: Optional[float] = None,
         allow_fallback_summary: bool = True
     ) -> Dict[str, Any]:
+        """End current session with summarization and archival.
 
+        Args:
+            allow_llm_summary: Enable LLM-based summarization
+            summary_timeout_seconds: Timeout for summary generation
+            allow_fallback_summary: Use simple summary if LLM fails
+
+        Returns:
+            Dict with session status and summary
+        """
         if not self.working:
             return {"status": "no_session"}
 
@@ -421,7 +446,14 @@ class MemoryManager:
         }
 
     async def _summarize_session(self, messages: List[TimestampedMessage]) -> Optional[Dict]:
+        """Generate LLM summary of session messages.
 
+        Args:
+            messages: List of session messages
+
+        Returns:
+            Summary dict with topics, tone, facts, insights or None
+        """
         if not self.model or not messages:
             return None
 
@@ -454,7 +486,14 @@ class MemoryManager:
         return None
 
     def _build_fallback_summary(self, messages: List[TimestampedMessage]) -> Dict[str, Any]:
+        """Build simple summary from last messages when LLM fails.
 
+        Args:
+            messages: List of session messages
+
+        Returns:
+            Minimal summary dict
+        """
         def _last_for(role_names: set) -> str:
             for msg in reversed(messages):
                 if msg.role.lower() in role_names:
@@ -481,7 +520,15 @@ class MemoryManager:
         }
 
     def query(self, query: str, include_all: bool = False) -> Dict[str, Any]:
+        """Search across all memory sources.
 
+        Args:
+            query: Search query
+            include_all: Include session archive results
+
+        Returns:
+            Dict with results from working, sessions, and long_term
+        """
         results = {
             "working": [],
             "sessions": [],
@@ -504,8 +551,16 @@ class MemoryManager:
         return results
 
     def migrate_legacy_data(self, old_db_path: str = None, dry_run: bool = True) -> Dict:
+        """Migrate data from old ChromaDB to new storage.
+
+        Args:
+            old_db_path: Path to old database
+            dry_run: Preview without actual migration
+
+        Returns:
+            Migration statistics dict
+        """
         old_db_path = old_db_path or str(CHROMADB_PATH)
-        """Migrate data from old ChromaDB."""
         migrator = LegacyMemoryMigrator(
             old_db_path=old_db_path,
             new_long_term=self.long_term
@@ -513,7 +568,11 @@ class MemoryManager:
         return migrator.migrate(dry_run=dry_run)
 
     def get_stats(self) -> Dict[str, Any]:
+        """Get statistics from all memory components.
 
+        Returns:
+            Dict with working, sessions, and long_term stats
+        """
         return {
             "working": {
                 "messages": len(self.working),
@@ -524,3 +583,47 @@ class MemoryManager:
             "sessions": self.session_archive.get_stats(),
             "long_term": self.long_term.get_stats(),
         }
+
+    # === Facade Methods for ChatHandler ===
+
+    def get_session_id(self) -> str:
+        """Get current session ID."""
+        return self.working.session_id if self.working else "unknown"
+
+    def get_turn_count(self) -> int:
+        """Get current turn count."""
+        return self.working.get_turn_count() if self.working else 0
+
+    def is_working_available(self) -> bool:
+        """Check if working memory is available."""
+        return self.working is not None
+
+    def is_session_archive_available(self) -> bool:
+        """Check if session archive is available."""
+        return self.session_archive is not None
+
+    def is_graph_rag_available(self) -> bool:
+        """Check if GraphRAG is available."""
+        return self.graph_rag is not None
+
+    def get_time_elapsed_context(self) -> Optional[str]:
+        """Get time elapsed context from working memory."""
+        if self.working:
+            return self.working.get_time_elapsed_context()
+        return None
+
+    def get_progressive_context(self, full_turns: int = 40) -> str:
+        """Get progressive context from working memory."""
+        if self.working:
+            return self.working.get_progressive_context(full_turns=full_turns)
+        return ""
+
+    async def save_working_to_disk(self) -> bool:
+        """Save working memory to disk (async wrapper)."""
+        if not self.working:
+            return False
+        try:
+            import asyncio
+            return await asyncio.to_thread(self.working.save_to_disk)
+        except Exception:
+            return False

@@ -1,13 +1,18 @@
-"""텍스트 정제 유틸리티"""
+"""Text sanitization utilities."""
 import re
 
 
 def sanitize_memory_text(text: str) -> str:
-    """메모리 저장 전 텍스트 정제
+    """Sanitize text before storing in memory.
 
-    - 마크다운 문법 제거 (**bold**, `code`)
-    - 이모지 제거
-    - 허용: 영어, 한국어, 숫자, 기본 문장부호
+    Removes markdown syntax (**bold**, `code`), emojis, and special characters.
+    Allows: English, Korean, numbers, and basic punctuation.
+
+    Args:
+        text: Raw text to sanitize
+
+    Returns:
+        Cleaned text string
     """
     if not text:
         return text

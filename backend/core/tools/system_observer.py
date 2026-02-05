@@ -6,6 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
+from backend.core.logging import get_logger
+
+_log = get_logger("tools.system_observer")
+
 AXEL_ROOT = Path(__file__).resolve().parents[3]
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -295,7 +299,8 @@ async def list_available_logs() -> Dict[str, Any]:
                     "size_kb": round(stat.st_size / 1024, 2),
                     "modified": stat.st_mtime
                 })
-            except Exception:
+            except OSError as e:
+                _log.debug("Log file stat failed", path=str(log_file), error=str(e))
                 continue
 
     logs.sort(key=lambda x: x["modified"], reverse=True)
@@ -336,9 +341,12 @@ def _search_file(
                     context_before=context_before,
                     context_after=context_after
                 ))
-    except Exception:
-
-        pass
+    except PermissionError:
+        _log.debug("Permission denied", path=str(file_path))
+    except UnicodeDecodeError:
+        pass  # 바이너리 파일 - 정상
+    except Exception as e:
+        _log.warning("File read failed", path=str(file_path), error=str(e))
 
     return matches
 

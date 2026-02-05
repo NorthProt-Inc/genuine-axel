@@ -4,14 +4,15 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 from backend.core.logging import get_logger
+from backend.config import MCP_MAX_TOOL_RETRIES, MCP_TOOL_RETRY_DELAY, MCP_MAX_TOOLS
 
 _log = get_logger("core.mcp_client")
 
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8555")
 
-# Retry configuration for resilient tool calls
-MAX_TOOL_RETRIES = 3
-TOOL_RETRY_DELAY = 0.5
+# Use config values
+MAX_TOOL_RETRIES = MCP_MAX_TOOL_RETRIES
+TOOL_RETRY_DELAY = MCP_TOOL_RETRY_DELAY
 
 CORE_TOOLS = [
 
@@ -25,8 +26,11 @@ CORE_TOOLS = [
     "google_deep_research",
     "hass_control_light",
     "hass_control_device",
+    "web_search",
+    "visit_webpage",
+    "deep_research",
 ]
-MAX_TOOLS = 10
+MAX_TOOLS = MCP_MAX_TOOLS
 
 class MCPClient:
 
@@ -112,7 +116,15 @@ class MCPClient:
         }
 
     async def call_tool_http(self, name: str, arguments: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Execute an MCP tool via HTTP fallback.
 
+        Args:
+            name: Tool name to execute
+            arguments: Tool arguments dict
+
+        Returns:
+            Dict with success status and result or error message
+        """
         arguments = arguments or {}
 
         try:
@@ -137,7 +149,11 @@ class MCPClient:
             return {"success": False, "error": str(e)}
 
     async def list_tools(self) -> list:
+        """Retrieve available MCP tools with basic info.
 
+        Returns:
+            List of dicts with name and description for each tool
+        """
         try:
             from backend.core.mcp_server import list_tools as mcp_list_tools
             tools = await mcp_list_tools()
@@ -147,7 +163,11 @@ class MCPClient:
             return []
 
     async def get_tools_with_schemas(self) -> list:
+        """Retrieve MCP tools with full input schemas.
 
+        Returns:
+            List of dicts with name, description, and input_schema
+        """
         try:
             from backend.core.mcp_server import list_tools as mcp_list_tools
             tools = await mcp_list_tools()
@@ -164,7 +184,18 @@ class MCPClient:
             return []
 
     async def get_gemini_tools(self, force_refresh: bool = False, max_tools: int = None) -> list:
+        """Get MCP tools formatted for Gemini function calling.
 
+        Converts tool schemas to Gemini-compatible format with caching.
+        Prioritizes core tools over others when limiting count.
+
+        Args:
+            force_refresh: Bypass cache and refresh tools
+            max_tools: Maximum number of tools to return
+
+        Returns:
+            List of Gemini-formatted function declarations
+        """
         max_tools = max_tools or MAX_TOOLS
 
         now = time.time()
@@ -224,7 +255,11 @@ class MCPClient:
 _client: Optional[MCPClient] = None
 
 def get_mcp_client() -> MCPClient:
+    """Get or create the singleton MCP client instance.
 
+    Returns:
+        Shared MCPClient instance
+    """
     global _client
     if _client is None:
         _client = MCPClient()

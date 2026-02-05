@@ -51,7 +51,8 @@ class GenerativeModelWrapper:
         else:
             self.client = client_or_model
 
-        self.model_name = model_name or os.getenv("DEFAULT_GEMINI_MODEL", "gemini-3-flash-preview")
+        from backend.config import DEFAULT_GEMINI_MODEL
+        self.model_name = model_name or DEFAULT_GEMINI_MODEL
 
     def clone(self) -> "GenerativeModelWrapper":
 

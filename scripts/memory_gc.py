@@ -41,6 +41,7 @@ def get_content_hash(content: str) -> str:
     return hashlib.md5(normalized.encode()).hexdigest()
 
 def phase1_hash_dedup(ltm, all_data, dry_run: bool = False) -> list:
+    """Phase 1: Hash-based exact duplicate removal."""
 
     print("\n[Phase 1] Hash-based deduplication (exact matches)...")
 
@@ -70,7 +71,7 @@ def phase1_hash_dedup(ltm, all_data, dry_run: bool = False) -> list:
 
     if duplicates_to_delete:
         if not dry_run:
-            ltm.collection.delete(ids=duplicates_to_delete)
+            ltm.delete_memories(duplicates_to_delete)
             print(f"  Deleted {len(duplicates_to_delete)} exact duplicates")
         else:
             print(f"  [DRY RUN] Would delete {len(duplicates_to_delete)} exact duplicates")
@@ -83,7 +84,7 @@ def phase2_semantic_dedup(ltm, dry_run: bool = False) -> list:
 
     print(f"\n[Phase 2] Semantic deduplication (threshold: {MemoryConfig.DUPLICATE_THRESHOLD})...")
 
-    results = ltm.collection.get(include=["documents", "metadatas"])
+    results = ltm.get_all_memories(include=["documents", "metadatas"])
 
     if not results['ids']:
         print("  No memories to check.")
@@ -106,39 +107,34 @@ def phase2_semantic_dedup(ltm, dry_run: bool = False) -> list:
         if not doc_content:
             continue
 
-        embedding = ltm._get_embedding(doc_content[:500], task_type="retrieval_query")
+        embedding = ltm.get_embedding_for_text(doc_content[:500], task_type="retrieval_query")
         if embedding is None:
             continue
 
         if hasattr(embedding, 'tolist'):
             embedding = embedding.tolist()
 
-        similar = ltm.collection.query(
-            query_embeddings=[embedding],
+        # Use the new API: find_similar_memories returns list of dicts
+        similar = ltm.find_similar_memories(
+            content=doc_content[:500],
+            threshold=0.0,  # Return all, we filter by similarity manually
             n_results=5,
-            include=["documents", "distances"]
         )
 
         processed += 1
         if processed % batch_size == 0:
             print(f"  Processed {processed}/{total} documents...")
 
-        for j, (sim_id, dist) in enumerate(zip(similar['ids'][0], similar['distances'][0])):
+        for sim_mem in similar:
+            sim_id = sim_mem.get('id')
+            similarity = sim_mem.get('similarity', 0)
+
             if sim_id == doc_id:
                 continue
 
-            similarity = 1 - dist
-
             if similarity >= MemoryConfig.DUPLICATE_THRESHOLD and sim_id not in keep_ids:
                 if sim_id not in [d['id'] for d in to_delete]:
-
-                    preview = ''
-                    try:
-                        docs = similar.get('documents')
-                        if docs and docs[0] and len(docs[0]) > j:
-                            preview = str(docs[0][j])[:50]
-                    except (TypeError, IndexError, KeyError):
-                        pass
+                    preview = sim_mem.get('content', '')[:50]
                     to_delete.append({
                         'id': sim_id,
                         'original_id': doc_id,
@@ -153,7 +149,7 @@ def phase2_semantic_dedup(ltm, dry_run: bool = False) -> list:
             print(f"  [{d['similarity']:.2f}] {d['preview']}...")
 
         if not dry_run:
-            ltm.collection.delete(ids=[d['id'] for d in to_delete])
+            ltm.delete_memories([d['id'] for d in to_delete])
             print(f"  Deleted {len(to_delete)} semantic duplicates")
         else:
              print(f"  [DRY RUN] Would delete {len(to_delete)} semantic duplicates")
@@ -424,7 +420,7 @@ async def main_async(dry_run: bool = False):
     except ImportError:
         print("Note: init_state not available (MCP not installed)")
 
-    all_data = ltm.collection.get(include=['documents', 'metadatas'], limit=5000)
+    all_data = ltm.get_all_memories(include=['documents', 'metadatas'], limit=5000)
 
     if not all_data['documents']:
         print("No memories found.")
@@ -443,7 +439,7 @@ async def main_async(dry_run: bool = False):
     print(f"  ChromaDB: {chroma_result.get('oversized', 0)} {'would be ' if dry_run else ''}removed")
 
     if phase0_cleaned > 0 and not dry_run:
-        all_data = ltm.collection.get(include=['documents', 'metadatas'], limit=5000)
+        all_data = ltm.get_all_memories(include=['documents', 'metadatas'], limit=5000)
         print(f"  Refreshed: {len(all_data['documents'])} memories remaining")
 
     if dry_run:
@@ -451,28 +447,30 @@ async def main_async(dry_run: bool = False):
         print("CONVERGENCE SIMULATION (Continuing to full check...)")
         print("=" * 60)
 
+    import traceback
+
     try:
         hash_deleted = phase1_hash_dedup(ltm, all_data, dry_run=dry_run)
     except Exception as e:
-        gc_errors.append({"phase": 1, "error": str(e)})
+        gc_errors.append({"phase": 1, "error": str(e), "traceback": traceback.format_exc()})
         hash_deleted = []
 
     try:
         semantic_deleted = phase2_semantic_dedup(ltm, dry_run=dry_run)
     except Exception as e:
-        gc_errors.append({"phase": 2, "error": str(e)})
+        gc_errors.append({"phase": 2, "error": str(e), "traceback": traceback.format_exc()})
         semantic_deleted = []
 
     try:
         consolidation_report = phase3_consolidation(ltm, dry_run=dry_run)
     except Exception as e:
-        gc_errors.append({"phase": 3, "error": str(e)})
+        gc_errors.append({"phase": 3, "error": str(e), "traceback": traceback.format_exc()})
         consolidation_report = {}
 
     try:
         eviction_report = phase4_smart_eviction(memory_manager, dry_run=dry_run)
     except Exception as e:
-        gc_errors.append({"phase": 4, "error": str(e)})
+        gc_errors.append({"phase": 4, "error": str(e), "traceback": traceback.format_exc()})
         eviction_report = {}
 
     try:
@@ -480,26 +478,26 @@ async def main_async(dry_run: bool = False):
         session_summarized = session_result.get('sessions_processed', 0)
         messages_archived = session_result.get('messages_archived', 0)
     except Exception as e:
-        gc_errors.append({"phase": 5, "error": str(e)})
+        gc_errors.append({"phase": 5, "error": str(e), "traceback": traceback.format_exc()})
         session_summarized = 0
         messages_archived = 0
 
     try:
         episodic_report = await phase6_episodic_to_semantic(memory_manager)
     except Exception as e:
-        gc_errors.append({"phase": 6, "error": str(e)})
+        gc_errors.append({"phase": 6, "error": str(e), "traceback": traceback.format_exc()})
         episodic_report = {}
 
     try:
         persona_count, persona_insights = await phase7_persona_evolution(ltm)
     except Exception as e:
-        gc_errors.append({"phase": 7, "error": str(e)})
+        gc_errors.append({"phase": 7, "error": str(e), "traceback": traceback.format_exc()})
         persona_count, persona_insights = 0, []
 
     try:
         sleep_learning_report = phase8_sleep_learning(persona_insights, dry_run=dry_run)
     except Exception as e:
-        gc_errors.append({"phase": 8, "error": str(e)})
+        gc_errors.append({"phase": 8, "error": str(e), "traceback": traceback.format_exc()})
         sleep_learning_report = {}
 
     # Phase 9 제거됨 - KG pruning은 dedup_knowledge_graph.py로 분리
@@ -507,7 +505,7 @@ async def main_async(dry_run: bool = False):
     kg_prune_report = {"skipped": True, "reason": "moved to dedup_knowledge_graph.py"}
 
     print("\n" + "=" * 60)
-    final_count = ltm.collection.count()
+    final_count = ltm.count()
 
     r_hash = len(hash_deleted)
     r_semantic = len(semantic_deleted)
@@ -548,7 +546,12 @@ async def main_async(dry_run: bool = False):
         print("-" * 30)
         print(f"  ERRORS:               {len(gc_errors)}")
         for err in gc_errors:
-            print(f"    Phase {err['phase']}: {err['error'][:60]}...")
+            print(f"    Phase {err['phase']}: {err['error']}")
+            if err.get('traceback'):
+                # traceback의 마지막 몇 줄만 표시
+                tb_lines = err['traceback'].strip().split('\n')
+                for line in tb_lines[-4:]:
+                    print(f"      {line}")
 
     print("=" * 60)
 

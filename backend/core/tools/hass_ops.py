@@ -15,6 +15,7 @@ _log = get_logger("tools.hass")
 LIGHTS = [
     "light.wiz_rgbw_tunable_77d6a0",
     "light.wiz_rgbw_tunable_77d8f6",
+    "light.wiz_rgbw_tunable_77dc8c",
     "light.wiz_rgbw_tunable_77de14",
     "light.wiz_rgbw_tunable_77de40",
     "light.wiz_rgbw_tunable_77e054",
@@ -82,6 +83,12 @@ SENSOR_GROUPS = {
     ],
 }
 
+def _get_hass_config():
+    """Lazy import to avoid circular dependency."""
+    from backend.config import HASS_TIMEOUT, HASS_MAX_RETRIES
+    return HASS_TIMEOUT, HASS_MAX_RETRIES
+
+# Defaults used at module load, but actual values fetched at runtime
 HASS_TIMEOUT = 10.0
 MAX_RETRIES = 2
 
@@ -143,8 +150,12 @@ async def _hass_api_call(
     method: str,
     endpoint: str,
     payload: Optional[Dict] = None,
-    retries: int = MAX_RETRIES
+    retries: int = None
 ) -> HASSResult:
+    # Get config values at runtime to avoid circular import
+    hass_timeout, hass_max_retries = _get_hass_config()
+    if retries is None:
+        retries = hass_max_retries
 
     _log.debug("HASS req", endpoint=endpoint, method=method)
 
@@ -182,7 +193,7 @@ async def _hass_api_call(
                 service="hass",
                 base_url=hass_url,
                 headers=headers,
-                timeout=HASS_TIMEOUT
+                timeout=hass_timeout
             )
 
             if method.upper() == "GET":

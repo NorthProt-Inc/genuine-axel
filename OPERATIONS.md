@@ -2,51 +2,79 @@
 
 > **환경:** Pop!_OS (Ubuntu 24.04 LTS) + Systemd
 > **대상:** Mark (종민)
-> **마지막 업데이트:** 2026-02-01
+> **마지막 업데이트:** 2026-02-05
 
 ---
 
 ## 목차
 
 1. [서비스 구조](#서비스-구조)
-2. [기초 생존 명령어](#기초-생존-명령어)
-3. [파일 & 디렉토리 조작](#파일--디렉토리-조작)
-4. [프로세스 & 서비스 관리](#프로세스--서비스-관리)
-5. [Git 버전 관리](#git-버전-관리)
-6. [Python 환경 관리](#python-환경-관리)
-7. [Container 관리](#container-관리)
-8. [디버깅 & 문제 해결](#디버깅--문제-해결)
+2. [Claude Code 통합](#claude-code-통합)
+3. [기초 생존 명령어](#기초-생존-명령어)
+4. [파일 & 디렉토리 조작](#파일--디렉토리-조작)
+5. [프로세스 & 서비스 관리](#프로세스--서비스-관리)
+6. [Git 버전 관리](#git-버전-관리)
+7. [Python 환경 관리](#python-환경-관리)
+8. [시스템 모니터링 & 디버깅](#시스템-모니터링--디버깅)
 9. [Axel 시스템 전용 명령어](#axel-시스템-전용-명령어)
-10. [응급 상황 대응](#응급-상황-대응)
-11. [빠른 참조 카드](#빠른-참조-카드)
+10. [일상 운영 시나리오](#일상-운영-시나리오)
+11. [트러블슈팅 의사결정 트리](#트러블슈팅-의사결정-트리)
+12. [Cron 자동화](#cron-자동화)
+13. [유용한 원라이너](#유용한-원라이너)
+14. [백업 & 복구](#백업--복구)
+15. [응급 상황 대응](#응급-상황-대응)
+16. [빠른 참조 카드](#빠른-참조-카드)
 
 ---
 
 ## 서비스 구조
 
-### Systemd User Services (Python/axnmihn)
+### Systemd User Services
 > **참고:** 모든 서비스는 **user service**로 `systemctl --user`로 관리 (sudo 불필요)
 
-| 서비스 | 포트 | 설명 |
-|--------|------|------|
-| axnmihn-backend.service | 8000 | Main FastAPI Backend |
-| axnmihn-mcp.service | 8555 | MCP Server (SSE) |
-| axnmihn-research.service | 8765 | Research MCP Server |
-| axnmihn-wakeword.service | - | Wakeword Detector |
-| northprot-containers.service | - | All Podman Containers |
-| axel-sleep.service | - | Sleep Cycle (데이터 추출 + LoRA) |
-| auto-cleanup.service | - | Weekly Auto Cleanup |
+#### 핵심 서비스
 
-### Docker/Podman Containers (인프라)
-| 컨테이너 | 포트 | 설명 |
-|----------|------|------|
-| homeassistant | 8123 | Home Automation |
-| cloudflared | - | Main Tunnel |
-| cloudflared-hass | - | HASS Tunnel |
-| cloudflared-ssh | - | SSH Tunnel |
-| axnmihn-frontend | 3080 | Frontend (Open WebUI) |
-| axnmihn-mongodb | 27017 | MongoDB |
-| axnmihn-meilisearch | 7700 | Meilisearch |
+| 서비스 | 포트 | 설명 | 리소스 제한 |
+|--------|------|------|-------------|
+| axnmihn-backend.service | 8000 | Main FastAPI Backend | 4G RAM, CPU 200% |
+| axnmihn-mcp.service | 8555 | MCP Server (SSE) | 1G RAM, CPU 100% |
+| axnmihn-research.service | 8766 | Research MCP Server (Deep Research) | 2G RAM, CPU 150% |
+| axnmihn-wakeword.service | - | Wakeword Detector | 512M RAM, CPU 50% |
+
+#### MCP 확장 서비스
+
+| 서비스 | 포트 | 설명 | 리소스 제한 |
+|--------|------|------|-------------|
+| context7-mcp.service | 3002 | Context7 MCP (Supergateway) | 1G RAM |
+| markitdown-mcp.service | 3001 | Markitdown MCP (Supergateway) | 1G RAM |
+
+#### 인프라 서비스
+
+| 서비스 | 설명 |
+|--------|------|
+| docker.service | Docker Rootless (Home Assistant 등 컨테이너) |
+
+#### 보조 서비스 (Oneshot/Timer)
+
+| 서비스 | 타이머 주기 | 설명 |
+|--------|-------------|------|
+| auto-cleanup.service | 매주 1회 | 주간 자동 정리 |
+| axnmihn-mcp-reclaim.service | 10분마다 | MCP cgroup 페이지 캐시 회수 (300MB 초과 시) |
+| context7-mcp-restart.service | 6시간마다 | Context7 프로세스 릭 정리용 재시작 |
+| markitdown-mcp-restart.service | 4시간마다 | Markitdown 프로세스 릭 정리용 재시작 |
+| claude-review.service | 3시간마다 | 자동 코드 리뷰 |
+
+### 포트 요약
+
+| 포트 | 서비스 |
+|------|--------|
+| 3000 | Open WebUI (Frontend) |
+| 3001 | Markitdown MCP |
+| 3002 | Context7 MCP |
+| 8000 | Axnmihn Backend |
+| 8123 | Home Assistant (Docker) |
+| 8555 | Main MCP Server |
+| 8766 | Research MCP Server |
 
 ### 설정 파일 위치
 ```
@@ -54,24 +82,102 @@
 ├── .claude/                    # Claude Code 전역 설정
 │   ├── settings.json
 │   └── settings.local.json
+├── .config/
+│   ├── systemd/user/           # Systemd User Service 파일 (12개)
+│   └── logrotate/
+│       └── axnmihn.conf        # 로그 로테이션 설정
 ├── projects/axnmihn/           # 프로젝트
 │   ├── .claude/                # 프로젝트별 Claude 설정
 │   │   └── settings.local.json
 │   ├── .env                    # 환경변수
-│   └── .mcp.json               # MCP 서버 설정
-└── projects-env/                # Python venv (프로젝트 외부)
+│   ├── data/                   # 런타임 데이터
+│   ├── logs/                   # 애플리케이션 로그
+│   └── storage/                # 리서치 아티팩트, 크론 결과
+└── projects-env/               # Python venv (프로젝트 외부)
 ```
 
 ### Systemd 서비스 파일 위치
 ```
-~/.config/systemd/user/           # User Services (sudo 불필요)
-├── axnmihn-backend.service       # 메인 백엔드
+~/.config/systemd/user/
+├── axnmihn-backend.service
 ├── axnmihn-mcp.service
+├── axnmihn-mcp-reclaim.service        # + .timer
 ├── axnmihn-research.service
 ├── axnmihn-wakeword.service
-├── northprot-containers.service  # 모든 Podman 컨테이너
-├── axel-sleep.service            # 수면 주기 (LoRA 훈련)
-└── auto-cleanup.service          # 주간 자동 정리
+├── context7-mcp.service
+├── context7-mcp-restart.service       # + .timer
+├── markitdown-mcp.service
+├── markitdown-mcp-restart.service     # + .timer
+├── docker.service
+├── auto-cleanup.service               # + .timer
+└── claude-review.service              # + .timer
+```
+
+---
+
+## Claude Code 통합
+
+> Claude Code에서 Axel 시스템을 효율적으로 관리하기 위한 슬래시 명령어와 사용법
+
+### 슬래시 명령어 빠른 참조
+
+| 명령어 | 설명 | 예시 |
+|--------|------|------|
+| `/restart` | 백엔드 재시작 + 헬스체크 | `/restart` |
+| `/logs` | 로그 확인 | `/logs error`, `/logs warn`, `/logs 50` |
+| `/services` | 전체 서비스 상태 확인 | `/services` |
+| `/hass` | Home Assistant 기기 제어 | `/hass light on`, `/hass light off` |
+| `/analyze-error` | 최근 에러 분석 및 원인 추적 | `/analyze-error` |
+| `/model-check` | LLM 모델 설정 전체 확인 | `/model-check` |
+| `/cleanup` | 미사용 코드/임포트 검색 | `/cleanup` |
+| `/security` | 보안 취약점 스캔 | `/security` |
+| `/dead-code` | 미사용 함수/클래스 검출 | `/dead-code` |
+| `/purge-cache` | Python 캐시 정리 | `/purge-cache` |
+| `/context-prime` | 프로젝트 컨텍스트 빠른 로딩 | `/context-prime` |
+
+### 명령어 상세 사용법
+
+#### `/logs` - 로그 확인
+```bash
+/logs error      # 에러 로그만 확인
+/logs warn       # 경고 로그 확인
+/logs 100        # 최근 100줄 확인
+/logs all        # 전체 로그 스트림
+```
+
+#### `/hass` - Home Assistant 제어
+```bash
+/hass light on          # 조명 켜기
+/hass light off         # 조명 끄기
+/hass light toggle      # 조명 토글
+/hass light brightness 50  # 밝기 50%로 설정
+```
+
+### 일반적인 작업 흐름
+
+#### 1. 코드 수정 후 반영
+```
+1. 코드 수정
+2. /restart          # 백엔드 재시작
+3. /logs error       # 에러 확인
+4. curl 테스트       # API 동작 확인
+```
+
+#### 2. 문제 발생 시 진단
+```
+1. /services         # 서비스 상태 확인
+2. /analyze-error    # 에러 분석
+3. /logs error       # 상세 로그 확인
+4. 원인 파악 후 수정
+5. /restart
+```
+
+#### 3. 성능 문제 조사
+```
+1. /services         # 메모리/CPU 확인
+2. /logs warn        # 경고 메시지 확인
+3. nvidia-smi        # GPU 상태 (터미널)
+4. htop              # 프로세스 상태 (터미널)
 ```
 
 ---
@@ -157,7 +263,6 @@ ps aux                          # 모든 프로세스
 ps aux | grep python            # Python 프로세스만
 pgrep -a python                 # 파이썬 관련 프로세스 깔끔하게 나열
 htop                            # 대화형 프로세스 모니터
-top                             # 기본 모니터
 ```
 
 ### 프로세스 종료
@@ -165,18 +270,16 @@ top                             # 기본 모니터
 kill PID                        # 정상 종료 요청
 kill -9 PID                     # 강제 종료 (안 죽을 때)
 pkill -f "uvicorn"              # 이름으로 종료
-pkill -f [파일명.py]            # 부드러운 종료 (저장 등 마무리 기회)
-pkill -9 -f [파일명.py]         # 강제 종료 (말 안 들을 때)
+pkill -f [파일명.py]            # 부드러운 종료
+pkill -9 -f [파일명.py]         # 강제 종료
 killall python                  # 모든 python 프로세스 종료
 ```
 
-### 포트 확인 (매우 중요!)
+### 포트 확인
 ```bash
 lsof -i:8000                    # 8000 포트 사용 프로세스
-lsof -i:8001                    # 8001 포트 확인
-ss -tlnp                        # 모든 열린 포트 (현대적)
-ss -tlnp | grep -E "8000|8555|8765|3080|8123"  # 주요 포트만
-netstat -tlnp                   # 전통적인 포트 확인
+ss -tlnp                        # 모든 열린 포트
+ss -tlnp | grep -E "8000|8555|8766|3000|3001|3002|8123"  # 주요 포트만
 ```
 
 > **TIP:** Axel 백엔드가 안 뜰 때 99%는 **포트 충돌**! 먼저 `lsof -i:포트번호`로 확인.
@@ -194,12 +297,19 @@ systemctl --user start axnmihn-backend
 systemctl --user stop axnmihn-backend
 systemctl --user restart axnmihn-backend
 
-# 전체 재시작
+# 핵심 3개 서비스 동시 재시작
 systemctl --user restart axnmihn-backend axnmihn-mcp axnmihn-research
+
+# 전체 재시작 (MCP 포함)
+systemctl --user restart axnmihn-backend axnmihn-mcp axnmihn-research context7-mcp markitdown-mcp
 
 # 부팅 시 자동 시작
 systemctl --user enable axnmihn-backend
 systemctl --user disable axnmihn-backend
+
+# 타이머 관리
+systemctl --user list-timers                # 모든 타이머 확인
+systemctl --user status axnmihn-mcp-reclaim.timer  # 특정 타이머 상태
 ```
 
 ### 로그 확인
@@ -318,67 +428,26 @@ which python                    # 어떤 Python인지 확인
 
 ---
 
-## Container 관리
-
-### Podman 기본 명령어
-```bash
-podman ps                       # 실행 중인 컨테이너
-podman images                   # 이미지 목록
-```
-
-### 컨테이너 조작
-```bash
-podman start container_name     # 시작
-podman stop container_name      # 중지
-podman restart container_name   # 재시작
-podman logs container_name      # 로그 보기
-podman logs -f container_name   # 로그 실시간 팔로우
-```
-
-### Axel 컨테이너들
-```bash
-# 개별 재시작
-podman restart axnmihn-frontend
-podman restart mongodb
-podman restart meilisearch
-podman restart cloudflared
-
-# 전체 재시작
-podman restart meilisearch mongodb axnmihn-frontend cloudflared
-```
-
-### 컨테이너 내부 접속
-```bash
-podman exec -it container_name /bin/bash    # 컨테이너 쉘 접속
-podman exec -it mongodb mongosh             # MongoDB 직접 접속
-```
-
-### Docker 관리 (호환)
-```bash
-docker ps -a                    # 모든 컨테이너
-docker logs -f axnmihn-frontend # 로그
-docker restart axnmihn-frontend # 재시작
-```
-
----
-
-## 디버깅 & 문제 해결
+## 시스템 모니터링 & 디버깅
 
 ### 디스크 사용량
 ```bash
 df -h                           # 전체 디스크 사용량
+df -h /home                     # /home 파티션만
 du -sh *                        # 현재 폴더 내 크기
 du -sh * | sort -h              # 크기순 정렬
-ncdu                            # 대화형 디스크 분석 (설치 필요)
+du -sh ~/projects/axnmihn/data/*  # Axel 데이터 크기 확인
+ncdu                            # 대화형 디스크 분석
 ```
 
 ### 메모리 & CPU
 ```bash
 free -h                         # 메모리 사용량
-watch -n 1 nvidia-smi           # 1초마다 GPU 모니터링
+vmstat 1 5                      # CPU/메모리 상태 5초간 모니터링
+htop                            # 대화형 프로세스 모니터
 
-# 시스템 전체 모니터링 (CPU, RAM, GPU, 온도)
-watch -n 1 'echo "=== CPU ===" && top -bn1 | head -5 && echo "" && echo "=== RAM ===" && free -h && echo "" && echo "=== GPU ===" && nvidia-smi --query-gpu=name,temperature.gpu,memory.used,memory.total,utilization.gpu --format=csv'
+# Axel 서비스 메모리 사용량 확인
+systemctl --user status axnmihn-backend axnmihn-mcp axnmihn-research --no-pager | grep -E "●|Memory"
 ```
 
 ### GPU 관리
@@ -386,6 +455,9 @@ watch -n 1 'echo "=== CPU ===" && top -bn1 | head -5 && echo "" && echo "=== RAM
 nvidia-smi                      # GPU 상태 확인
 watch -n 1 nvidia-smi           # GPU 상태 실시간 모니터링
 sudo nvidia-smi -pl 350         # Power Limit 350W로 올리기
+
+# GPU 요약 (온도, 메모리, 사용률)
+nvidia-smi --query-gpu=name,temperature.gpu,memory.used,memory.total,utilization.gpu --format=csv
 ```
 
 ### 네트워크
@@ -393,17 +465,38 @@ sudo nvidia-smi -pl 350         # Power Limit 350W로 올리기
 ping google.com                 # 인터넷 연결 확인
 curl -I https://api.example.com # HTTP 헤더만 확인
 curl https://api.example.com    # API 호출 테스트
+ip a                            # 네트워크 인터페이스 목록
+ss -tlnp                        # 열린 포트 목록
+```
+
+### 시스템 전체 모니터링 (원라이너)
+```bash
+# CPU + RAM + GPU 한눈에
+watch -n 1 'echo "=== CPU ===" && top -bn1 | head -5 && echo "" && echo "=== RAM ===" && free -h && echo "" && echo "=== GPU ===" && nvidia-smi --query-gpu=name,temperature.gpu,memory.used,memory.total,utilization.gpu --format=csv'
 ```
 
 ### OpenRGB (RGB 조명)
 ```bash
-which openrgb                    # 설치 확인
-sudo openrgb --mode off          # 끄기
+# 서버: sudo systemctl start/stop/status openrgb-server
+openrgb -p off.orp               # 끄기 (프로파일)
 openrgb --color 000000           # 특정 색으로
 ```
 
----
+### 로그 로테이션
+```bash
+# 설정 파일: ~/.config/logrotate/axnmihn.conf
+# - 매일 로테이션, 7일 보관, 압축
+# - cron으로 매일 자정 실행
 
+# 수동 실행
+logrotate --state ~/.config/logrotate/state ~/.config/logrotate/axnmihn.conf
+
+# 저널 로그 정리
+journalctl --user --vacuum-size=500M
+sudo journalctl --vacuum-size=500M
+```
+
+---
 
 ## Axel 시스템 전용 명령어
 
@@ -412,11 +505,13 @@ openrgb --color 000000           # 특정 색으로
 /home/northprot/projects/axnmihn/              # 메인 코드
 /home/northprot/projects/axnmihn/data/         # 데이터
 /home/northprot/projects/axnmihn/logs/         # 로그
+/home/northprot/projects/axnmihn/storage/      # 리서치 아티팩트, 크론 결과
 /home/northprot/.claude/                       # Claude Code 설정
 ```
 
 ### 백엔드 재시작 & 로그
 ```bash
+systemctl --user restart axnmihn-backend && sleep 5 && systemctl --user status axnmihn-backend --no-pager
 # 재시작 + 로그 팔로우 (원라이너) - 추천!
 systemctl --user restart axnmihn-backend && tail -f ~/projects/axnmihn/logs/backend.log
 
@@ -429,14 +524,22 @@ systemctl --user status axnmihn-backend
 ### MCP 서버 관리
 ```bash
 # User service로 관리 (sudo 불필요)
-systemctl --user status axnmihn-mcp      # 상태 확인
-systemctl --user restart axnmihn-mcp     # 재시작
-journalctl --user -u axnmihn-mcp -f      # 로그 확인
-systemctl --user stop axnmihn-mcp        # 중지
-systemctl --user disable axnmihn-mcp     # 자동 시작 비활성화
+systemctl --user status axnmihn-mcp.service       # 상태 확인
+systemctl --user restart axnmihn-mcp.service      # 재시작
+journalctl --user -u axnmihn-mcp.service -f       # 로그 확인
+systemctl --user stop axnmihn-mcp.service         # 중지
 
-# MCP 서버 직접 실행
-PYTHONPATH=/home/northprot/projects/axnmihn /home/northprot/projects-env/bin/python /home/northprot/projects/axnmihn/backend/core/mcp_server.py
+# Research MCP
+systemctl --user restart axnmihn-research.service
+journalctl --user -u axnmihn-research.service -f
+
+# Context7 MCP
+systemctl --user restart context7-mcp.service
+journalctl --user -u context7-mcp.service -f
+
+# Markitdown MCP
+systemctl --user restart markitdown-mcp.service
+journalctl --user -u markitdown-mcp.service -f
 ```
 
 ### Memory GC 수동 실행
@@ -460,19 +563,38 @@ python scripts/regenerate_persona.py
 
 | 스크립트 | 설명 | 사용법 |
 |----------|------|--------|
-| memory_gc.py | 메모리 GC | `python scripts/memory_gc.py [check\|cleanup\|full] [--dry-run]` |
-| night_ops.py | 야간 자율 학습 | cron으로 실행 |
+| memory_gc.py | 메모리 GC (대화, 지식그래프, 벡터DB) | `python scripts/memory_gc.py [check\|cleanup\|full] [--dry-run]` |
+| night_ops.py | 야간 자율 학습 (self-reflection) | cron으로 실행 (0:50~5:50 PST) |
 | regenerate_persona.py | 페르소나 재생성 | `python scripts/regenerate_persona.py` |
-| evolve_persona_24h.py | 24시간 진화 | cron으로 실행 |
-| populate_knowledge_graph.py | 지식 그래프 생성 | `python scripts/populate_knowledge_graph.py` |
-| dedup_knowledge_graph.py | 지식 그래프 중복 제거 | `python scripts/dedup_knowledge_graph.py` |
-| db_maintenance.py | DB 유지보수 | `python scripts/db_maintenance.py` |
-| cleanup_messages.py | 메시지 정리 (LLM 기반) | `python scripts/cleanup_messages.py [--dry-run] [--limit N]` |
-| cron_memory_gc.sh | 메모리 GC cron | `./scripts/cron_memory_gc.sh` |
+| evolve_persona_24h.py | 대화 기반 페르소나 진화 (미사용) | 현재 비활성화됨 |
+| populate_knowledge_graph.py | 지식 그래프 초기 구축 | `python scripts/populate_knowledge_graph.py` |
+| dedup_knowledge_graph.py | 지식 그래프 중복 노드/관계 제거 | `python scripts/dedup_knowledge_graph.py` |
+| db_maintenance.py | SQLite DB 최적화 (VACUUM, 통계) | `python scripts/db_maintenance.py` |
+| cleanup_messages.py | 오래된 메시지 정리 (LLM 품질 판단) | `python scripts/cleanup_messages.py [--dry-run] [--limit N]` |
+| run_migrations.py | DB 스키마 마이그레이션 | `python scripts/run_migrations.py` |
+| axel_chat.py | 터미널 채팅 인터페이스 (TUI) | `python scripts/axel_chat.py` |
+| cron_memory_gc.sh | 메모리 GC cron 래퍼 | `./scripts/cron_memory_gc.sh` |
 | cron_audio_cleanup.sh | 오디오/로그 캐시 정리 | `./scripts/cron_audio_cleanup.sh` |
-| run_migrations.py | DB 마이그레이션 | `python scripts/run_migrations.py` |
+
+### axel_chat.py 사용법
+
+터미널에서 직접 Axel과 대화할 수 있는 TUI 인터페이스:
+
+```bash
+cd /home/northprot/projects/axnmihn
+source ~/projects-env/bin/activate
+python scripts/axel_chat.py
+```
+
+**주요 기능:**
+- 실시간 스트리밍 응답
+- 대화 히스토리 유지
+- 멀티라인 입력 지원 (`\` 줄 끝에 추가)
+- `/exit` 또는 Ctrl+C로 종료
 
 ### API 테스트
+
+#### 기본 엔드포인트
 ```bash
 # 헬스체크
 curl http://localhost:8000/health
@@ -482,25 +604,484 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"gemini","messages":[{"role":"user","content":"안녕"}]}'
 
-# 메모리 검색
-curl "http://localhost:8000/memory/search?query=test&limit=5"
+# 스트리밍 응답
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gemini","messages":[{"role":"user","content":"안녕"}],"stream":true}'
+```
+
+#### 메모리 API
+```bash
+# 메모리 검색 (시맨틱)
+curl "http://localhost:8000/memory/search?query=프로젝트%20계획&limit=5"
+
+# 메모리 저장
+curl -X POST http://localhost:8000/memory/store \
+  -H "Content-Type: application/json" \
+  -d '{"content":"테스트 메모리","metadata":{"source":"test"}}'
+
+# 최근 대화 조회
+curl "http://localhost:8000/memory/recent?limit=10"
+
+# 지식 그래프 쿼리
+curl -X POST http://localhost:8000/memory/graph/query \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Python 관련 지식"}'
+```
+
+#### 오디오 API
+```bash
+# TTS (Text-to-Speech)
+curl -X POST http://localhost:8000/audio/tts \
+  -H "Content-Type: application/json" \
+  -d '{"text":"안녕하세요","voice":"default"}' \
+  --output speech.wav
+
+# STT (Speech-to-Text)
+curl -X POST http://localhost:8000/audio/stt \
+  -F "audio=@recording.wav"
+```
+
+#### MCP 서버 테스트
+```bash
+# MCP 서버 상태 (SSE 연결)
+curl http://localhost:8555/sse
+
+# Research MCP 상태
+curl http://localhost:8766/sse
+
+# MCP 도구 목록 (tools/list)
+curl -X POST http://localhost:8555/message \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
 ### 전체 상태 한눈에 보기
 ```bash
-# 서비스 + 컨테이너 + 포트 한 번에
-echo "=== Services ===" && systemctl --user status axnmihn-backend axnmihn-mcp axnmihn-research --no-pager | grep -E "●|Active" && echo "" && echo "=== Containers ===" && podman ps --format "table {{.Names}}\t{{.Status}}" && echo "" && echo "=== Ports ===" && ss -tlnp | grep -E "8000|8555|8765|3080|8123"
+# 서비스 + 포트 한 번에
+echo "=== Services ===" && \
+systemctl --user status axnmihn-backend axnmihn-mcp axnmihn-research context7-mcp markitdown-mcp --no-pager | grep -E "●|Active" && \
+echo "" && echo "=== Ports ===" && \
+ss -tlnp | grep -E "8000|8555|8766|3000|3001|3002|8123"
 ```
 
 ### 로그 파일 목록
 ```
-logs/axnmihn.log        # 통합 로그
-logs/backend.log        # 백엔드 로그
-logs/backend_error.log  # 백엔드 에러
-logs/mcp.log            # MCP 서버 로그
-logs/mcp_error.log      # MCP 에러
-logs/research.log       # 리서치 로그
-logs/wakeword_error.log # 웨이크워드 에러
+logs/axnmihn.log              # 통합 로그
+logs/backend.log              # 백엔드 로그
+logs/backend_error.log        # 백엔드 에러
+logs/mcp.log                  # MCP 서버 로그
+logs/mcp_error.log            # MCP 에러
+logs/research.log             # 리서치 로그
+logs/research_error.log       # 리서치 에러
+logs/wakeword.log             # 웨이크워드 로그
+logs/wakeword_error.log       # 웨이크워드 에러
+logs/context7_mcp.log         # Context7 MCP 로그
+logs/context7_mcp_error.log   # Context7 MCP 에러
+logs/markitdown_mcp.log       # Markitdown MCP 로그
+logs/markitdown_mcp_error.log # Markitdown MCP 에러
+logs/night_ops.log            # 야간 작업 로그
+```
+
+---
+
+## 일상 운영 시나리오
+
+### 아침에 확인할 것들
+
+```bash
+# 1. 서비스 상태 한눈에 (또는 /services)
+systemctl --user status axnmihn-backend axnmihn-mcp axnmihn-research --no-pager | grep -E "●|Active|Memory"
+
+# 2. 야간 작업 로그 확인
+tail -50 ~/projects/axnmihn/logs/night_ops.log
+
+# 3. 에러 발생 여부 (또는 /logs error)
+grep -c "ERROR" ~/projects/axnmihn/logs/backend.log
+
+# 4. 디스크 여유 공간
+df -h /home | tail -1
+
+# 5. GPU 상태 (머신러닝 사용 시)
+nvidia-smi --query-gpu=memory.used,memory.total --format=csv
+```
+
+### 코드 배포 전 체크리스트
+
+```bash
+# 1. 현재 상태 확인
+git status
+git diff
+
+# 2. 문법 검사
+python -m py_compile backend/app.py
+
+# 3. 타입 검사 (선택)
+mypy backend/ --ignore-missing-imports
+
+# 4. 테스트 실행
+pytest tests/ -v
+
+# 5. 서비스 재시작 (또는 /restart)
+systemctl --user restart axnmihn-backend
+
+# 6. 헬스체크
+curl http://localhost:8000/health
+
+# 7. 기본 기능 테스트
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gemini","messages":[{"role":"user","content":"테스트"}]}'
+```
+
+### 성능 문제 발생 시
+
+```bash
+# 1. 어떤 서비스가 느린지 확인
+systemctl --user status axnmihn-backend axnmihn-mcp axnmihn-research --no-pager | grep -E "Memory|CPU"
+
+# 2. 시스템 전체 리소스
+htop  # 또는 top
+
+# 3. GPU 사용률
+nvidia-smi
+
+# 4. 디스크 I/O
+iostat -x 1 5
+
+# 5. 네트워크 연결 수
+ss -s
+
+# 6. 느린 쿼리/요청 로그
+grep -i "slow\|timeout" ~/projects/axnmihn/logs/backend.log | tail -20
+```
+
+### 메모리 문제 해결
+
+```bash
+# 1. 메모리 상태 확인
+free -h
+
+# 2. 메모리 많이 쓰는 프로세스
+ps aux --sort=-%mem | head -10
+
+# 3. 서비스별 메모리 사용량
+systemctl --user status axnmihn-backend axnmihn-mcp axnmihn-research context7-mcp markitdown-mcp --no-pager | grep Memory
+
+# 4. 메모리 GC 실행
+cd ~/projects/axnmihn && source ~/projects-env/bin/activate
+python scripts/memory_gc.py check    # 상태 확인
+python scripts/memory_gc.py cleanup  # 정리
+
+# 5. Python 캐시 정리
+find ~/projects/axnmihn -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null
+
+# 6. 서비스 재시작 (메모리 해제)
+systemctl --user restart axnmihn-backend axnmihn-mcp axnmihn-research
+```
+
+### 새 기능 추가 후
+
+```bash
+# 1. 의존성 설치
+source ~/projects-env/bin/activate
+pip install -r backend/requirements.txt
+
+# 2. DB 마이그레이션 (필요시)
+python scripts/run_migrations.py
+
+# 3. 서비스 재시작
+systemctl --user restart axnmihn-backend
+
+# 4. 로그 모니터링
+tail -f ~/projects/axnmihn/logs/backend.log
+
+# 5. 기능 테스트 후 커밋
+git add .
+git commit -m "feat: 새 기능 추가"
+```
+
+---
+
+## 트러블슈팅 의사결정 트리
+
+### 서비스가 응답하지 않음
+
+```
+서비스 응답 없음
+    │
+    ├─ 포트 열려있나? ─── lsof -i:8000
+    │       │
+    │       ├─ 열려있음 ──── 프로세스 hang → systemctl --user restart
+    │       └─ 안 열림 ───── 서비스 죽음 → journalctl --user -u axnmihn-backend -n 50
+    │
+    ├─ 로그에 에러? ───── tail -50 ~/projects/axnmihn/logs/backend_error.log
+    │       │
+    │       ├─ OOM (Out of Memory) → 메모리 정리 후 재시작
+    │       ├─ DB Lock → SQLite 락 해제 또는 재시작
+    │       └─ Import Error → pip install 누락 패키지
+    │
+    └─ 리소스 부족? ──── htop, df -h, nvidia-smi
+            │
+            ├─ CPU 100% → 무한루프 의심, 프로세스 종료
+            ├─ RAM 부족 → 메모리 GC, 서비스 재시작
+            ├─ 디스크 풀 → 로그/캐시 정리
+            └─ GPU 메모리 → GPU 프로세스 정리
+```
+
+### API 에러 응답
+
+```
+API 에러
+    │
+    ├─ 400 Bad Request ─── 요청 형식 오류 → 파라미터 확인
+    ├─ 401 Unauthorized ── 인증 실패 → API 키 확인
+    ├─ 404 Not Found ───── 엔드포인트 없음 → URL 확인
+    ├─ 500 Internal ────── 서버 에러 → 로그 확인
+    │       │
+    │       ├─ Traceback 확인 (아래→위로 읽기)
+    │       ├─ 최근 코드 변경 확인 (git diff)
+    │       └─ 의존성 문제 확인 (pip list)
+    │
+    └─ 502/503/504 ─────── 프록시/타임아웃 → 백엔드 상태 확인
+```
+
+### MCP 연결 문제
+
+```
+MCP 연결 실패
+    │
+    ├─ SSE 연결 안됨 ──── curl http://localhost:8555/sse
+    │       │
+    │       ├─ Connection refused → 서비스 시작 확인
+    │       └─ 연결됨 but 응답 없음 → 서비스 재시작
+    │
+    ├─ 도구 호출 실패 ─── 로그 확인
+    │       │
+    │       ├─ Timeout → 도구 실행 시간 초과
+    │       ├─ Invalid params → 파라미터 형식 오류
+    │       └─ Tool not found → 도구 등록 확인
+    │
+    └─ Claude Code 연결 ── .claude/settings.local.json 확인
+            │
+            ├─ mcpServers 설정 확인
+            └─ 포트/URL 일치 확인
+```
+
+### 메모리 관련 문제
+
+```
+메모리 문제
+    │
+    ├─ 검색 결과 이상 ─── ChromaDB 상태 확인
+    │       │
+    │       ├─ 인덱스 손상 → 재구축 필요
+    │       └─ 벡터 불일치 → 임베딩 재생성
+    │
+    ├─ 지식그래프 오류 ── Neo4j/SQLite 확인
+    │       │
+    │       ├─ 연결 실패 → DB 서비스 확인
+    │       └─ 쿼리 오류 → 스키마 확인
+    │
+    └─ 대화 컨텍스트 ──── 최근 메시지 확인
+            │
+            ├─ 컨텍스트 누락 → 세션 ID 확인
+            └─ 오래된 정보 → 메모리 GC 실행
+```
+
+---
+
+## Cron 자동화
+
+### 현재 등록된 Cron 작업
+
+| 스케줄 | 작업 | 설명 |
+|--------|------|------|
+| `0 4 * * *` | `cron_memory_gc.sh` | 메모리 GC - 매일 오전 4시 PST |
+| `0 5 * * *` | `cron_audio_cleanup.sh` | 오디오/로그 캐시 정리 - 매일 오전 5시 |
+| `50 0-5 * * *` | `night_ops.py` | Night Shift - 0:50~5:50 PST (6회/일) |
+| `0 0 * * *` | `logrotate` | 로그 로테이션 - 매일 자정 |
+| `10 2 * * *` | `daily_cleanup.sh` | 시스템 전체 정리 - 오전 2:10 |
+
+### Systemd Timer 작업
+
+| 타이머 | 주기 | 설명 |
+|--------|------|------|
+| auto-cleanup.timer | 매주 1회 (랜덤 지연 1시간) | 주간 자동 정리 |
+| axnmihn-mcp-reclaim.timer | 부팅 후 5분, 이후 10분마다 | MCP 메모리 캐시 회수 |
+| context7-mcp-restart.timer | 6시간마다 | Context7 프로세스 릭 정리 |
+| markitdown-mcp-restart.timer | 4시간마다 | Markitdown 프로세스 릭 정리 |
+| claude-review.timer | 3시간마다 (랜덤 지연 5분) | 자동 코드 리뷰 |
+
+### Cron 관리
+```bash
+crontab -l                      # 현재 cron 목록 확인
+crontab -e                      # cron 편집 (nano 에디터)
+
+# 타이머 확인
+systemctl --user list-timers --all
+```
+
+---
+
+## 유용한 원라이너
+
+### 시스템 전체 상태
+```bash
+# 모든 Axel 서비스 상태 + 포트 + 디스크 한 번에
+echo "=== Services ===" && systemctl --user status axnmihn-backend axnmihn-mcp axnmihn-research context7-mcp markitdown-mcp --no-pager | grep -E "●|Active|Memory" && echo "" && echo "=== Ports ===" && ss -tlnp | grep -E "8000|8555|8766|3000|3001|3002|8123" && echo "" && echo "=== Disk ===" && df -h /home | tail -1
+```
+
+### 로그 검색
+```bash
+# 특정 에러 검색 (모든 로그에서)
+grep -r "ERROR" ~/projects/axnmihn/logs/ --include="*.log" | tail -20
+
+# 최근 1시간 에러만
+find ~/projects/axnmihn/logs/ -name "*.log" -mmin -60 -exec grep -l "ERROR" {} \;
+
+# 특정 request_id 추적
+grep "request_id" ~/projects/axnmihn/logs/backend.log | tail -10
+```
+
+### 디스크 정리
+```bash
+# Python 캐시 정리
+find ~/projects/axnmihn -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null
+
+# pip 캐시 정리
+pip cache purge
+
+# 오래된 로그 수동 정리 (7일 이상)
+find ~/projects/axnmihn/logs/ -name "*.log.*" -mtime +7 -delete
+
+# 저널 로그 정리
+journalctl --user --vacuum-size=500M
+```
+
+### 프로세스 디버깅
+```bash
+# Axel 관련 모든 프로세스
+pgrep -af "axnmihn|backend|mcp_server|research_server"
+
+# 메모리 많이 쓰는 프로세스 top 10
+ps aux --sort=-%mem | head -11
+
+# 파일 디스크립터 확인 (너무 많으면 문제)
+ls /proc/$(pgrep -f "backend.app")/fd | wc -l
+```
+
+### 빠른 복구
+```bash
+# 백엔드 + MCP 전체 재시작 (한 줄)
+systemctl --user restart axnmihn-backend axnmihn-mcp axnmihn-research && sleep 3 && systemctl --user status axnmihn-backend axnmihn-mcp axnmihn-research --no-pager | grep -E "●|Active"
+
+# 좀비 Python 프로세스 정리 후 재시작
+pkill -f uvicorn; pkill -f mcp_server; sleep 2; systemctl --user restart axnmihn-backend axnmihn-mcp axnmihn-research
+```
+
+---
+
+## 백업 & 복구
+
+### 핵심 데이터 위치
+
+| 데이터 | 경로 | 설명 |
+|--------|------|------|
+| SQLite DB | `data/axnmihn.db` | 대화, 메모리, 설정 |
+| ChromaDB | `data/chroma/` | 벡터 임베딩 |
+| 지식그래프 | `data/knowledge_graph.db` | 엔티티, 관계 |
+| 리서치 결과 | `storage/research/` | 딥 리서치 아티팩트 |
+| 로그 | `logs/` | 서비스 로그 (7일 보관) |
+| 환경변수 | `.env` | API 키, 설정 |
+
+### 수동 백업
+
+```bash
+# 백업 디렉토리 생성
+BACKUP_DIR=~/backups/axnmihn/$(date +%Y%m%d)
+mkdir -p $BACKUP_DIR
+
+# 1. SQLite DB 백업 (안전한 방법)
+sqlite3 ~/projects/axnmihn/data/axnmihn.db ".backup '$BACKUP_DIR/axnmihn.db'"
+
+# 2. 지식그래프 DB 백업
+sqlite3 ~/projects/axnmihn/data/knowledge_graph.db ".backup '$BACKUP_DIR/knowledge_graph.db'"
+
+# 3. ChromaDB 백업 (디렉토리 복사)
+cp -r ~/projects/axnmihn/data/chroma/ $BACKUP_DIR/chroma/
+
+# 4. 설정 파일 백업
+cp ~/projects/axnmihn/.env $BACKUP_DIR/
+cp -r ~/.claude/ $BACKUP_DIR/claude-config/
+
+# 5. 리서치 아티팩트 백업 (선택)
+cp -r ~/projects/axnmihn/storage/research/ $BACKUP_DIR/research/
+
+# 6. 백업 확인
+ls -lh $BACKUP_DIR/
+```
+
+### 원라이너 전체 백업
+
+```bash
+# 서비스 중지 → 백업 → 재시작
+systemctl --user stop axnmihn-backend axnmihn-mcp && \
+BACKUP_DIR=~/backups/axnmihn/$(date +%Y%m%d) && mkdir -p $BACKUP_DIR && \
+sqlite3 ~/projects/axnmihn/data/axnmihn.db ".backup '$BACKUP_DIR/axnmihn.db'" && \
+sqlite3 ~/projects/axnmihn/data/knowledge_graph.db ".backup '$BACKUP_DIR/knowledge_graph.db'" && \
+cp -r ~/projects/axnmihn/data/chroma/ $BACKUP_DIR/chroma/ && \
+cp ~/projects/axnmihn/.env $BACKUP_DIR/ && \
+systemctl --user start axnmihn-backend axnmihn-mcp && \
+echo "Backup completed: $BACKUP_DIR"
+```
+
+### 복구
+
+```bash
+# 1. 서비스 중지
+systemctl --user stop axnmihn-backend axnmihn-mcp axnmihn-research
+
+# 2. 기존 데이터 백업 (안전을 위해)
+mv ~/projects/axnmihn/data/axnmihn.db ~/projects/axnmihn/data/axnmihn.db.old
+
+# 3. 백업에서 복구
+BACKUP_DIR=~/backups/axnmihn/20260205  # 원하는 백업 날짜
+cp $BACKUP_DIR/axnmihn.db ~/projects/axnmihn/data/
+cp $BACKUP_DIR/knowledge_graph.db ~/projects/axnmihn/data/
+rm -rf ~/projects/axnmihn/data/chroma/
+cp -r $BACKUP_DIR/chroma/ ~/projects/axnmihn/data/
+
+# 4. 서비스 재시작
+systemctl --user start axnmihn-backend axnmihn-mcp axnmihn-research
+
+# 5. 확인
+curl http://localhost:8000/health
+```
+
+### 정기 백업 설정 (cron 예시)
+
+```bash
+# crontab -e로 추가
+# 매일 새벽 3시에 백업
+0 3 * * * BACKUP_DIR=~/backups/axnmihn/$(date +\%Y\%m\%d) && mkdir -p $BACKUP_DIR && sqlite3 ~/projects/axnmihn/data/axnmihn.db ".backup '$BACKUP_DIR/axnmihn.db'" 2>/dev/null
+
+# 오래된 백업 정리 (30일 이상)
+0 4 * * * find ~/backups/axnmihn/ -type d -mtime +30 -exec rm -rf {} + 2>/dev/null
+```
+
+### 긴급 복구: Git에서 코드 복구
+
+```bash
+# 최근 작동하던 상태로 코드 복구
+git log --oneline -10           # 최근 커밋 확인
+git checkout <commit-hash>      # 특정 커밋으로 이동
+
+# 또는 최근 N개 커밋 전으로
+git reset --hard HEAD~3         # 3개 커밋 전으로 (위험!)
+
+# 서비스 재시작
+systemctl --user restart axnmihn-backend axnmihn-mcp axnmihn-research
 ```
 
 ---
@@ -515,7 +1096,6 @@ tail -n 100 ~/projects/axnmihn/logs/backend.log
 
 # 2. 포트 확인
 lsof -i:8000
-lsof -i:8001
 
 # 3. 좀비 프로세스 정리
 pkill -f uvicorn
@@ -528,12 +1108,13 @@ systemctl --user restart axnmihn-backend
 ### 포트 충돌 (Address already in use)
 ```bash
 lsof -i:8000              # 누가 쓰고 있는지 확인
-sudo kill -9 PID          # 해당 프로세스 종료
+kill -9 PID               # 해당 프로세스 종료
 ```
 
 ### 서비스 hang
 ```bash
 systemctl --user stop axnmihn-backend
+sleep 2
 systemctl --user start axnmihn-backend
 ```
 
@@ -543,13 +1124,17 @@ systemctl --user start axnmihn-backend
 du -sh /home/northprot/* | sort -h | tail -20
 
 # 2. 로그 정리
+journalctl --user --vacuum-size=500M
 sudo journalctl --vacuum-size=500M
 
 # 3. Python 캐시 정리
-find . -type d -name "__pycache__" -exec rm -rf {} +
+find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null
 
 # 4. pip 캐시 정리
 pip cache purge
+
+# 5. 오래된 리서치 아티팩트 정리
+find ~/projects/axnmihn/storage/research/artifacts -mtime +30 -delete
 ```
 
 ### 변경사항 되돌리기
@@ -557,11 +1142,6 @@ pip cache purge
 git checkout -- file.txt       # 커밋 안 한 변경 취소
 git checkout -- .              # 모든 변경 취소 (위험!)
 git reset --hard HEAD          # 마지막 커밋으로 완전 복구 (더 위험!)
-```
-
-### 컨테이너 전체 재시작
-```bash
-podman restart meilisearch mongodb axnmihn-frontend cloudflared
 ```
 
 ### 시스템 재부팅 (최후의 수단)
@@ -573,6 +1153,22 @@ sudo reboot
 
 ## 빠른 참조 카드
 
+### Claude Code 슬래시 명령어
+
+| 상황 | 명령어 |
+|------|--------|
+| 서비스 재시작 | `/restart` |
+| 에러 로그 | `/logs error` |
+| 경고 로그 | `/logs warn` |
+| 서비스 상태 | `/services` |
+| 에러 분석 | `/analyze-error` |
+| 조명 켜기 | `/hass light on` |
+| 조명 끄기 | `/hass light off` |
+| 모델 설정 확인 | `/model-check` |
+| 캐시 정리 | `/purge-cache` |
+
+### 터미널 명령어
+
 | 상황 | 명령어 |
 |------|--------|
 | 어디있지? | `pwd` |
@@ -580,11 +1176,16 @@ sudo reboot
 | 포트 누가 쓰지? | `lsof -i:8000` |
 | 로그 보기 | `tail -f ~/projects/axnmihn/logs/backend.log` |
 | 서비스 재시작 | `systemctl --user restart axnmihn-backend` |
+| 전체 재시작 | `systemctl --user restart axnmihn-backend axnmihn-mcp axnmihn-research` |
+| 전체 상태 | `systemctl --user status axnmihn-backend axnmihn-mcp axnmihn-research --no-pager` |
+| 타이머 목록 | `systemctl --user list-timers` |
 | Git 상태 | `git status` |
 | venv 활성화 | `source ~/projects-env/bin/activate` |
 | 프로세스 죽이기 | `kill -9 PID` |
-| 컨테이너 상태 | `podman ps` |
 | GPU 상태 | `nvidia-smi` |
+| 디스크 확인 | `df -h /home` |
+| cron 확인 | `crontab -l` |
+| 빠른 백업 | `sqlite3 ~/projects/axnmihn/data/axnmihn.db ".backup ~/backups/quick.db"` |
 
 ---
 

@@ -12,11 +12,12 @@ load_dotenv(AXEL_ROOT / ".env")
 from backend.core.logging import get_logger
 from backend.core.utils.gemini_wrapper import get_gemini_wrapper
 from backend.core.utils.retry import retry_async, RetryConfig, DEFAULT_RETRY_CONFIG
+from backend.config import RESEARCH_POLL_INTERVAL, RESEARCH_MAX_POLL_TIME
 
 _log = get_logger("protocols.google")
 
-POLL_INTERVAL_SECONDS = 30
-MAX_POLL_TIME_SECONDS = 1800
+POLL_INTERVAL_SECONDS = RESEARCH_POLL_INTERVAL
+MAX_POLL_TIME_SECONDS = RESEARCH_MAX_POLL_TIME
 
 GOOGLE_RETRY_CONFIG = RetryConfig(
     max_retries=3,

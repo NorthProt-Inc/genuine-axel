@@ -31,13 +31,20 @@ CAUTION: You have full system access. Be careful with destructive commands.""",
         "properties": {
             "command": {"type": "string", "description": "Bash command to execute (sudo available without password)"},
             "cwd": {"type": "string", "description": "Working directory (default: project root)"},
-            "timeout": {"type": "integer", "description": "Timeout in seconds (default: 120)", "default": 120}
+            "timeout": {"type": "integer", "description": "Timeout in seconds (default: 180)", "default": 180}
         },
         "required": ["command"]
     }
 )
 async def run_command(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Execute a shell command on the host system.
 
+    Args:
+        arguments: Dict with command, cwd, and timeout
+
+    Returns:
+        TextContent with stdout/stderr output
+    """
     command = arguments.get("command", "")
     cwd = arguments.get("cwd", str(AXEL_ROOT))
     timeout = arguments.get("timeout", 120)
@@ -114,7 +121,14 @@ async def run_command(arguments: dict[str, Any]) -> Sequence[TextContent]:
     }
 )
 async def search_codebase_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Search for keywords across the codebase.
 
+    Args:
+        arguments: Dict with keyword, file_pattern, case_sensitive, max_results
+
+    Returns:
+        TextContent with formatted search results
+    """
     keyword = arguments.get("keyword", "")
     file_pattern = arguments.get("file_pattern", "*.py")
     case_sensitive = arguments.get("case_sensitive", False)
@@ -164,7 +178,14 @@ async def search_codebase_tool(arguments: dict[str, Any]) -> Sequence[TextConten
     }
 )
 async def search_codebase_regex_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Search codebase using regex patterns.
 
+    Args:
+        arguments: Dict with pattern, file_pattern, case_sensitive
+
+    Returns:
+        TextContent with formatted regex search results
+    """
     pattern = arguments.get("pattern", "")
     file_pattern = arguments.get("file_pattern", "*.py")
     case_sensitive = arguments.get("case_sensitive", False)
@@ -221,7 +242,14 @@ async def search_codebase_regex_tool(arguments: dict[str, Any]) -> Sequence[Text
     }
 )
 async def read_system_logs(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Read backend logs with optional filtering.
 
+    Args:
+        arguments: Dict with log_file, lines, filter_keyword
+
+    Returns:
+        TextContent with log content
+    """
     log_file = arguments.get("log_file", "backend.log")
     lines = arguments.get("lines", 50)
     filter_keyword = arguments.get("filter_keyword")
@@ -265,7 +293,11 @@ async def read_system_logs(arguments: dict[str, Any]) -> Sequence[TextContent]:
     }
 )
 async def list_available_logs_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """List all available log files.
 
+    Returns:
+        TextContent with log files and aliases
+    """
     _log.debug("TOOL invoke", fn="list_available_logs")
 
     try:
@@ -318,7 +350,14 @@ async def list_available_logs_tool(arguments: dict[str, Any]) -> Sequence[TextCo
     }
 )
 async def analyze_log_errors(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Analyze logs for errors and warnings.
 
+    Args:
+        arguments: Dict with log_file and lines
+
+    Returns:
+        TextContent with categorized error summary
+    """
     log_file = arguments.get("log_file", "backend.log")
     lines = arguments.get("lines", 500)
     _log.debug("TOOL invoke", fn="analyze_log_errors", log_file=log_file, lines=lines)
@@ -390,7 +429,14 @@ async def analyze_log_errors(arguments: dict[str, Any]) -> Sequence[TextContent]
     }
 )
 async def check_task_status(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Check status of async tasks.
 
+    Args:
+        arguments: Dict with task_id or list_active flag
+
+    Returns:
+        TextContent with task status or summary
+    """
     task_id = arguments.get("task_id")
     list_active = arguments.get("list_active", False)
     _log.debug("TOOL invoke", fn="check_task_status", task_id=task_id, list_active=list_active)
@@ -467,7 +513,14 @@ async def check_task_status(arguments: dict[str, Any]) -> Sequence[TextContent]:
     }
 )
 async def tool_metrics_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Get execution metrics for MCP tools.
 
+    Args:
+        arguments: Dict with optional tool_name
+
+    Returns:
+        TextContent with call counts, success rates, durations
+    """
     tool_name = arguments.get("tool_name")
     _log.debug("TOOL invoke", fn="tool_metrics", tool_name=tool_name)
 
@@ -526,7 +579,11 @@ async def tool_metrics_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
     }
 )
 async def system_status_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Get overall system health status.
 
+    Returns:
+        TextContent with circuit breakers, caches, and task summary
+    """
     _log.debug("TOOL invoke", fn="system_status")
 
     try:

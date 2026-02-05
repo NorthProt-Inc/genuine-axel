@@ -1,0 +1,38 @@
+"""Memory configuration settings."""
+
+from backend.config import (
+    MEMORY_BASE_DECAY_RATE,
+    MEMORY_MIN_RETENTION,
+    MEMORY_DECAY_DELETE_THRESHOLD,
+    MEMORY_SIMILARITY_THRESHOLD,
+    MEMORY_MIN_IMPORTANCE,
+)
+
+
+class MemoryConfig:
+    """Memory configuration - loads values from config.py with defaults."""
+
+    # Auto-flush settings
+    FLUSH_THRESHOLD = 50
+    FLUSH_INTERVAL_SECONDS = 300
+
+    # Values from config.py
+    BASE_DECAY_RATE = MEMORY_BASE_DECAY_RATE
+    MIN_RETENTION = MEMORY_MIN_RETENTION
+    DECAY_DELETE_THRESHOLD = MEMORY_DECAY_DELETE_THRESHOLD
+    DUPLICATE_THRESHOLD = MEMORY_SIMILARITY_THRESHOLD
+    MIN_IMPORTANCE = MEMORY_MIN_IMPORTANCE
+
+    # Default values
+    ACCESS_STABILITY_K = 0.3
+    RELATION_RESISTANCE_K = 0.1
+    REASSESS_AGE_HOURS = 168
+    REASSESS_BATCH_SIZE = 50
+    DECAY_RATE = 0.002
+    MIN_REPETITIONS = 1
+    SIMILAR_THRESHOLD = 0.75
+    PRESERVE_REPETITIONS = 3
+    EMBEDDING_MODEL = "models/gemini-embedding-001"
+
+    # Embedding cache settings
+    EMBEDDING_CACHE_SIZE = 256

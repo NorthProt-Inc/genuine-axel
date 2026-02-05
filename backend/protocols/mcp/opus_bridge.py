@@ -24,12 +24,13 @@ from backend.core.utils.opus_file_validator import (
     validate_opus_file_path as _validate_file_path,
     read_opus_file_content as _read_file_content,
 )
+from backend.config import OPUS_DEFAULT_MODEL, OPUS_COMMAND_TIMEOUT
 
 logger = get_logger("opus-bridge")
 
-DEFAULT_MODEL = "opus"
+DEFAULT_MODEL = OPUS_DEFAULT_MODEL
 
-COMMAND_TIMEOUT = 600
+COMMAND_TIMEOUT = OPUS_COMMAND_TIMEOUT
 
 def _build_context_block(file_paths: List[str]) -> tuple[str, List[str], List[str]]:
 

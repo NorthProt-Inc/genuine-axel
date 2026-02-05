@@ -16,6 +16,11 @@ class ModelConfig:
     description: str = ""
 
     def to_dict(self) -> dict:
+        """Convert model config to dictionary for API response.
+
+        Returns:
+            Dict with id, name, icon, and description
+        """
         return {
             "id": self.id,
             "name": self.name,
@@ -31,12 +36,20 @@ DEFAULT_MODEL = ModelConfig(
 )
 
 def get_model() -> ModelConfig:
+    """Get the default model configuration.
 
+    Returns:
+        ModelConfig for the primary LLM model
+    """
     _log.debug("model selected", model=DEFAULT_MODEL.id, provider=DEFAULT_MODEL.provider)
     return DEFAULT_MODEL
 
 def get_all_models() -> List[dict]:
+    """Get all available model configurations.
 
+    Returns:
+        List of model dicts for API response
+    """
     _log.debug("models list requested", count=1)
     return [DEFAULT_MODEL.to_dict()]
 

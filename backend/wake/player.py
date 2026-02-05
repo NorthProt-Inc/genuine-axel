@@ -4,12 +4,12 @@ from backend.core.logging import get_logger
 
 _log = get_logger("wake.player")
 
-RESOURCES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources")
+RESOURCES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "resources")
 
 class AudioPlayer:
     def __init__(self, device_index=None):
 
-        self.sink_name = "@DEFAULT_SINK@"
+        self.sink_name = "alsa_output.pci-0000_0c_00.1.hdmi-stereo"
 
         self.sounds = {
             "ready": os.path.join(RESOURCES_DIR, "chime_ready.wav"),

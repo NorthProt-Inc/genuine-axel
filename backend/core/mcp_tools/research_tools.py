@@ -26,7 +26,14 @@ For comprehensive research, use 'deep_research' instead.""",
     }
 )
 async def web_search(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Search the web using DuckDuckGo.
 
+    Args:
+        arguments: Dict with query and num_results
+
+    Returns:
+        TextContent with titles, URLs, and snippets
+    """
     query = arguments.get("query", "")
     num_results = arguments.get("num_results", 5)
     _log.debug("TOOL invoke", fn="web_search", query=query[:50] if query else None, num_results=num_results)
@@ -76,7 +83,14 @@ IDEAL FOR:
     }
 )
 async def visit_webpage(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Visit URL with headless browser and extract markdown content.
 
+    Args:
+        arguments: Dict with url
+
+    Returns:
+        TextContent with page content as markdown
+    """
     url = arguments.get("url", "")
     _log.debug("TOOL invoke", fn="visit_webpage", url=url[:80] if url else None)
 
@@ -129,7 +143,14 @@ async def visit_webpage(arguments: dict[str, Any]) -> Sequence[TextContent]:
     }
 )
 async def deep_research(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Execute free web research using DuckDuckGo and Playwright.
 
+    Args:
+        arguments: Dict with query
+
+    Returns:
+        TextContent with research report from top pages
+    """
     query = arguments.get("query", "")
     _log.debug("TOOL invoke", fn="deep_research", query=query[:50] if query else None)
 
@@ -178,7 +199,14 @@ TAVILY_API_KEY 필요.""",
     }
 )
 async def tavily_search(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Execute Tavily AI-powered search with summary.
 
+    Args:
+        arguments: Dict with query, max_results, search_depth
+
+    Returns:
+        TextContent with AI-summarized search results
+    """
     query = arguments.get("query", "")
     max_results = arguments.get("max_results", 5)
     search_depth = arguments.get("search_depth", "basic")
@@ -237,7 +265,14 @@ The artifact path is provided in the research output (look for "Path: ...").""",
     }
 )
 async def read_artifact_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Read full content of a saved research artifact.
 
+    Args:
+        arguments: Dict with path to artifact file
+
+    Returns:
+        TextContent with artifact content
+    """
     path = arguments.get("path", "")
     _log.debug("TOOL invoke", fn="read_artifact", path=path[:80] if path else None)
 
@@ -289,7 +324,14 @@ Each artifact entry includes:
     }
 )
 async def list_artifacts_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """List recently saved research artifacts.
 
+    Args:
+        arguments: Dict with optional limit
+
+    Returns:
+        TextContent with artifact list including paths and metadata
+    """
     limit = arguments.get("limit", 20)
     _log.debug("TOOL invoke", fn="list_artifacts", limit=limit)
 

@@ -1,104 +1,55 @@
-# ═══════════════════════════════════════════════════════════════
-# Axel Backend - .gitignore
-# ═══════════════════════════════════════════════════════════════
-
-# ─────────────────────────────────────────────────────────────────
 # Python
-# ─────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 build/
-develop-eggs/
 dist/
-downloads/
 eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
 
 # Virtual environments
 venv/
 .venv/
 env/
-ENV/
 
-# ─────────────────────────────────────────────────────────────────
+# Testing & Coverage
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Type checking & Linting
+.mypy_cache/
+.ruff_cache/
+
 # IDE & Editors
-# ─────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-.project
-.pydevproject
-.settings/
 
-# ─────────────────────────────────────────────────────────────────
-# Environment & Secrets (CRITICAL)
-# ─────────────────────────────────────────────────────────────────
+# Environment & Secrets
 .env
 .env.*
 !.env.example
 *.pem
 *.key
-**/credentials.json
-**/service_account.json
+credentials.json
+service_account.json
 
-# ─────────────────────────────────────────────────────────────────
-# Frontend (excluded - backend only repo)
-# ─────────────────────────────────────────────────────────────────
-frontend/
-
-# ─────────────────────────────────────────────────────────────────
-# Runtime Data (excluded)
-# ─────────────────────────────────────────────────────────────────
-# Database & Memory
+# Project specific
 data/
-storage/
 logs/
+storage/
+*.sqlite3
+*.db
 
-# ─────────────────────────────────────────────────────────────────
-# Temporary & Cache
-# ─────────────────────────────────────────────────────────────────
-*.tmp
-*.log
-*.cache
-.cache/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-htmlcov/
-.coverage
-.coverage.*
-coverage.xml
-*.cover
-
-# ─────────────────────────────────────────────────────────────────
-# OS Files
-# ─────────────────────────────────────────────────────────────────
+# OS
 .DS_Store
 Thumbs.db
 *.bak
-
-# ─────────────────────────────────────────────────────────────────
-# Node (if any)
-# ─────────────────────────────────────────────────────────────────
-node_modules/
-package-lock.json
-
-# ─────────────────────────────────────────────────────────────────
-# Misc
-# ─────────────────────────────────────────────────────────────────
-*.sqlite3
-*.db

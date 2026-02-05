@@ -66,7 +66,20 @@ class MemGPTManager:
         candidate_memories: List[Dict] = None,
         temporal_filter: dict = None
     ) -> Tuple[List[ScoredMemory], int]:
+        """Select memories within a token budget using relevance scoring.
 
+        Prioritizes memories by score while ensuring topic diversity and
+        staying within the specified token budget.
+
+        Args:
+            query: Search query for memory retrieval
+            token_budget: Maximum tokens to allocate (default: config.long_term_budget)
+            candidate_memories: Pre-fetched memories to select from
+            temporal_filter: Optional time range filter for retrieval
+
+        Returns:
+            Tuple of (selected memories, total tokens used)
+        """
         budget = token_budget or self.config.long_term_budget
 
         if candidate_memories is None:
@@ -129,7 +142,17 @@ class MemGPTManager:
         return selected, used_tokens
 
     def smart_eviction(self, dry_run: bool = True) -> Dict[str, Any]:
+        """Identify and optionally evict low-value memories.
 
+        Uses adaptive decay scoring to find memories that have become
+        irrelevant over time based on access patterns and connections.
+
+        Args:
+            dry_run: If True, only identify candidates without deletion
+
+        Returns:
+            Dict containing eviction statistics and candidate list
+        """
         from .permanent import (
             apply_adaptive_decay,
             get_memory_age_hours,
@@ -138,7 +161,7 @@ class MemGPTManager:
 
         try:
 
-            all_memories = self.long_term.collection.get(
+            all_memories = self.long_term.get_all_memories(
                 include=["documents", "metadatas"]
             )
 
@@ -194,7 +217,7 @@ class MemGPTManager:
 
                 for candidate in to_evict:
                     try:
-                        self.long_term.collection.delete(ids=[candidate['id']])
+                        self.long_term.delete_memories([candidate['id']])
                         evicted_count += 1
                     except Exception as e:
                         _log.warning("Eviction failed", id=candidate['id'], error=str(e))
@@ -221,7 +244,19 @@ class MemGPTManager:
         min_repetitions: int = None,
         dry_run: bool = True
     ) -> Dict[str, Any]:
+        """Transform episodic memories into generalized semantic knowledge.
 
+        Groups related episodic memories by topic and uses LLM to extract
+        patterns and general insights that can replace multiple specific memories.
+
+        Args:
+            min_age_days: Minimum age for memories to consider
+            min_repetitions: Minimum repetition count for candidate memories
+            dry_run: If True, only analyze without creating semantic memories
+
+        Returns:
+            Dict with transformation statistics and extracted knowledge
+        """
         min_age = min_age_days or self.config.semantic_threshold_days
         min_reps = min_repetitions or self.config.min_episodic_repetitions
 
@@ -232,7 +267,7 @@ class MemGPTManager:
 
         try:
 
-            all_memories = self.long_term.collection.get(
+            all_memories = self.long_term.get_all_memories(
                 include=["documents", "metadatas"]
             )
 
@@ -312,7 +347,18 @@ class MemGPTManager:
         topic: str,
         memories: List[Dict]
     ) -> Optional[SemanticKnowledge]:
+        """Extract generalized knowledge from a group of related memories.
 
+        Uses LLM to analyze multiple episodic memories and synthesize
+        a single semantic knowledge statement with confidence scoring.
+
+        Args:
+            topic: The topic category for the memory group
+            memories: List of related memory dicts with content
+
+        Returns:
+            SemanticKnowledge object if extraction succeeds, None otherwise
+        """
         memory_texts = "\n".join([
             f"- {m['content'][:200]}" for m in memories[:5]
         ])

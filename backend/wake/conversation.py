@@ -1,13 +1,29 @@
 import os
+import re
 import pyaudio
 import wave
 import tempfile
 import httpx
 import asyncio
-from typing import Optional
+import subprocess
+from typing import Optional, List
 from backend.core.logging import get_logger
 
 _log = get_logger("wake.conversation")
+
+
+def split_sentences(text: str) -> List[str]:
+    """Split text into sentences by punctuation.
+
+    Args:
+        text: Input text to split
+
+    Returns:
+        List of sentence strings
+    """
+    sentences = re.split(r'(?<=[.!?。！？])\s*', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    return sentences if sentences else [text]
 
 API_BASE = os.environ.get("AXNMIHN_API", "http://localhost:8000")
 API_KEY = os.environ.get("AXNMIHN_API_KEY") or os.environ.get("API_KEY")
@@ -62,17 +78,10 @@ class ConversationHandler:
 
             _log.info("axel res", text=response_text[:80])
 
-            _log.debug("tts synth start")
-            audio_data = await self._synthesize(response_text)
+            _log.debug("tts streaming start")
+            await self._synthesize_and_play_streaming(response_text)
 
-            if not audio_data:
-                _log.error("tts fail")
-                return None
-
-            _log.debug("aud playback start", bytes=len(audio_data))
-            await self._play_audio(audio_data)
-
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(1.0)
             _log.info("conv done, ready for next")
 
             return response_text
@@ -178,39 +187,85 @@ class ConversationHandler:
             _log.debug("chat res recv", chars=len(content))
             return content
 
-    async def _synthesize(self, text: str) -> Optional[bytes]:
+    async def _synthesize_sentence(self, text: str) -> Optional[bytes]:
+        """Synthesize a single sentence to audio via TTS API.
 
+        Args:
+            text: Sentence text to synthesize
+
+        Returns:
+            Audio bytes or None on failure
+        """
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{API_BASE}/v1/audio/speech",
                 json={
                     "input": text,
                     "voice": "axel",
-                    "response_format": "mp3"
+                    "response_format": "wav"
                 },
                 headers=_auth_headers()
             )
 
             if resp.status_code != 200:
-                _log.error("tts req fail", status=resp.status_code)
+                _log.error("tts req fail", status=resp.status_code, text=text[:30])
                 return None
 
-            _log.debug("tts done", bytes=len(resp.content))
             return resp.content
 
-    async def _play_audio(self, audio_data: bytes):
+    async def _synthesize_and_play_streaming(self, text: str):
+        """Synthesize and play audio with sentence-level streaming.
 
-        import subprocess
+        Args:
+            text: Full text to speak
+        """
+        sentences = split_sentences(text)
+        _log.info("tts streaming", sentences=len(sentences))
 
-        temp_path = tempfile.mktemp(suffix=".mp3")
+        audio_queue = asyncio.Queue()
+        tts_done = asyncio.Event()
+
+        async def tts_worker():
+            """백그라운드 TTS 처리"""
+            for i, sentence in enumerate(sentences):
+                _log.debug("tts sentence", idx=i, text=sentence[:30])
+                audio = await self._synthesize_sentence(sentence)
+                if audio:
+                    await audio_queue.put(audio)
+            tts_done.set()
+
+        async def play_worker():
+            """오디오 재생 (큐에서 가져와서 재생)"""
+            while True:
+                try:
+                    audio = await asyncio.wait_for(audio_queue.get(), timeout=1.0)
+                    await self._play_audio_async(audio)
+                except asyncio.TimeoutError:
+                    if tts_done.is_set() and audio_queue.empty():
+                        break
+
+        # TTS와 재생을 동시 실행
+        await asyncio.gather(tts_worker(), play_worker())
+        _log.debug("tts streaming done")
+
+    async def _play_audio_async(self, audio_data: bytes):
+        """Play audio asynchronously using paplay.
+
+        Args:
+            audio_data: WAV audio bytes to play
+        """
+        temp_path = tempfile.mktemp(suffix=".wav")
         try:
             with open(temp_path, 'wb') as f:
                 f.write(audio_data)
 
-            _log.debug("aud play via paplay", path=temp_path)
-
-            subprocess.run(['paplay', temp_path], check=False)
-            _log.debug("aud playback done")
+            _log.debug("aud play", bytes=len(audio_data))
+            proc = await asyncio.create_subprocess_exec(
+                'paplay', temp_path,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            await proc.wait()
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)

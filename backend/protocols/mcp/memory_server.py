@@ -173,24 +173,44 @@ async def retrieve_context(
     }
 
 def _parse_timestamp(timestamp_str: str):
+    """Parse timestamp string to datetime object.
 
+    Supports multiple formats: ISO 8601, with/without timezone.
+
+    Args:
+        timestamp_str: Timestamp string to parse
+
+    Returns:
+        datetime object with UTC timezone, or None if parsing fails
+    """
     from datetime import datetime, timezone
 
     if not timestamp_str:
         return None
 
+    formats = ['%Y-%m-%dT%H:%M:%S%z', '%Y-%m-%dT%H:%M:%S.%f%z', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']
+    timestamp_str = timestamp_str.replace('Z', '+00:00')
+
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(timestamp_str, fmt)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed
+        except ValueError:
+            continue
+
+    # fromisoformat도 시도 (Python 3.11+에서 더 유연함)
     try:
-        if 'T' in timestamp_str:
-            mem_time = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-        else:
-            mem_time = datetime.fromisoformat(timestamp_str)
+        parsed = datetime.fromisoformat(timestamp_str)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        pass
 
-        if mem_time.tzinfo is None:
-            mem_time = mem_time.replace(tzinfo=timezone.utc)
-
-        return mem_time
-    except Exception:
-        return None
+    _log.debug("Unparseable timestamp", timestamp=timestamp_str[:30])
+    return None
 
 def _format_temporal_label(timestamp_str: str) -> tuple[str, str]:
 
@@ -199,11 +219,11 @@ def _format_temporal_label(timestamp_str: str) -> tuple[str, str]:
     if not timestamp_str:
         return ("unknown", "OLD")
 
-    try:
-        mem_time = _parse_timestamp(timestamp_str)
-        if not mem_time:
-            return ("unknown", "OLD")
+    mem_time = _parse_timestamp(timestamp_str)
+    if not mem_time:
+        return ("unknown", "OLD")
 
+    try:
         now_time = datetime.now(timezone.utc)
         delta = now_time - mem_time
         hours = delta.total_seconds() / 3600
@@ -216,25 +236,29 @@ def _format_temporal_label(timestamp_str: str) -> tuple[str, str]:
             label = "OLD"
 
         return (formatted_dt, label)
-    except Exception:
+    except Exception as e:
+        _log.debug("Temporal label calculation failed", timestamp=timestamp_str[:30], error=str(e))
         return ("unknown", "OLD")
 
 def _format_memory_age(timestamp_str: str) -> str:
+    """Format memory age as human-readable relative time.
 
+    Args:
+        timestamp_str: ISO timestamp string
+
+    Returns:
+        Relative time string (e.g., '2h ago', 'yesterday', '3d ago')
+    """
     from datetime import datetime, timezone
 
     if not timestamp_str:
         return ""
 
+    mem_time = _parse_timestamp(timestamp_str)
+    if not mem_time:
+        return ""
+
     try:
-        if 'T' in timestamp_str:
-            mem_time = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-        else:
-            mem_time = datetime.fromisoformat(timestamp_str)
-
-        if mem_time.tzinfo is None:
-            mem_time = mem_time.replace(tzinfo=timezone.utc)
-
         now_time = datetime.now(timezone.utc)
         delta = now_time - mem_time
 
@@ -255,7 +279,8 @@ def _format_memory_age(timestamp_str: str) -> str:
             return f"{days // 30}mo ago"
         else:
             return mem_time.strftime("%Y-%m-%d")
-    except Exception:
+    except Exception as e:
+        _log.debug("Memory age formatting failed", timestamp=timestamp_str[:30], error=str(e))
         return ""
 
 async def get_recent_logs(limit: int = 50) -> Dict[str, Any]:

@@ -48,7 +48,11 @@ INTERN_ANALYSIS_PROMPT = """리서치 인턴으로서 원본 데이터를 분석
 _active_tasks: dict[str, asyncio.Task] = {}
 
 def get_active_research_tasks() -> list[dict]:
+    """Get list of active background research tasks.
 
+    Returns:
+        List of task info dicts with task_id, done, cancelled
+    """
     return [
         {
             "task_id": tid,
@@ -63,14 +67,27 @@ async def _analyze_findings(
     raw_report: str,
     source: Literal["google", "deep_dive"]
 ) -> str:
+    """Analyze raw research data with LLM intern analysis.
 
+    Args:
+        query: Original research query
+        raw_report: Raw research output
+        source: Research source type
+
+    Returns:
+        Formatted analysis markdown
+    """
     try:
         from backend.core.utils.gemini_wrapper import get_gemini_wrapper
+
+        from backend.config import DEFAULT_THINKING_LEVEL
 
         wrapper = get_gemini_wrapper()
         response = wrapper.generate_content_sync(
             contents=f"{INTERN_ANALYSIS_PROMPT}\n\n{raw_report}",
-            stream=False
+            stream=False,
+            enable_thinking=True,
+            thinking_level=DEFAULT_THINKING_LEVEL
         )
 
         analysis = response.text if hasattr(response, 'text') else str(response)
@@ -88,7 +105,18 @@ def _save_report(
     source: str,
     execution_time: float
 ) -> Path:
+    """Save research report to inbox directory.
 
+    Args:
+        query: Research query
+        raw_report: Raw research output
+        analysis: LLM analysis result
+        source: Research source type
+        execution_time: Total execution time in seconds
+
+    Returns:
+        Path to saved report file
+    """
     RESEARCH_INBOX_DIR.mkdir(parents=True, exist_ok=True)
 
     date_str = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -135,7 +163,15 @@ def _append_to_research_log(
     execution_time: float,
     success: bool
 ) -> None:
+    """Append entry to research log file.
 
+    Args:
+        query: Research query
+        source: Research source type
+        report_path: Path to saved report
+        execution_time: Execution time in seconds
+        success: Whether research succeeded
+    """
     try:
 
         if not RESEARCH_LOG_PATH.exists():
@@ -177,7 +213,14 @@ async def _run_research_pipeline(
     depth: Optional[int] = None,
     task_id: str = ""
 ) -> None:
+    """Execute full research pipeline: fetch, analyze, save.
 
+    Args:
+        query: Research query
+        source: Research source type
+        depth: Research depth (1-5)
+        task_id: Unique task identifier
+    """
     import time
     start_time = time.time()
 
@@ -254,7 +297,16 @@ def dispatch_async_research(
     source: Literal["google"] = "google",
     depth: Optional[int] = None
 ) -> str:
+    """Dispatch research task to background.
 
+    Args:
+        query: Research query
+        source: Research source type
+        depth: Research depth (1-5)
+
+    Returns:
+        Status message with task ID and output locations
+    """
     task_id = f"{source}_{datetime.now().strftime('%H%M%S')}"
 
     task = asyncio.create_task(
@@ -291,7 +343,16 @@ async def run_research_sync(
     source: Literal["google"] = "google",
     depth: Optional[int] = None
 ) -> str:
+    """Execute research synchronously and return result.
 
+    Args:
+        query: Research query
+        source: Research source type
+        depth: Research depth (1-5)
+
+    Returns:
+        Analysis with report path and execution time
+    """
     import time
     start_time = time.time()
 

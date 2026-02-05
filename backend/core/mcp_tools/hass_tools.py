@@ -34,7 +34,14 @@ _log = get_logger("mcp.hass_tools")
     }
 )
 async def hass_control_light_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Control Home Assistant lights with brightness and color.
 
+    Args:
+        arguments: Dict with entity_id, action, brightness, color
+
+    Returns:
+        TextContent with operation result
+    """
     entity_id = arguments.get("entity_id", "all")
     action = arguments.get("action", "turn_on")
     brightness_pct = arguments.get("brightness")
@@ -93,7 +100,14 @@ async def hass_control_light_tool(arguments: dict[str, Any]) -> Sequence[TextCon
     }
 )
 async def hass_control_device_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Control Home Assistant devices (fans, switches, etc.).
 
+    Args:
+        arguments: Dict with entity_id and action
+
+    Returns:
+        TextContent with operation result
+    """
     entity_id = arguments.get("entity_id", "")
     action = arguments.get("action", "turn_on")
     _log.debug("TOOL invoke", fn="hass_control_device", entity_id=entity_id, action=action)
@@ -142,7 +156,14 @@ For unknown entities: Use hass_list_entities(domain='sensor') first to discover 
     }
 )
 async def hass_read_sensor_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Read sensor values from Home Assistant.
 
+    Args:
+        arguments: Dict with query (alias or entity_id)
+
+    Returns:
+        TextContent with sensor value
+    """
     query = arguments.get("query", "")
     _log.debug("TOOL invoke", fn="hass_read_sensor", query=query[:50] if query else None)
 
@@ -179,7 +200,14 @@ async def hass_read_sensor_tool(arguments: dict[str, Any]) -> Sequence[TextConte
     }
 )
 async def hass_get_state_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Get raw state of any Home Assistant entity.
 
+    Args:
+        arguments: Dict with entity_id
+
+    Returns:
+        TextContent with full state object and attributes
+    """
     entity_id = arguments.get("entity_id", "")
     _log.debug("TOOL invoke", fn="hass_get_state", entity_id=entity_id)
 
@@ -238,7 +266,14 @@ Example queries:
     }
 )
 async def hass_list_entities_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """List available Home Assistant entities by domain.
 
+    Args:
+        arguments: Dict with optional domain filter
+
+    Returns:
+        TextContent with entity list or domain summary
+    """
     domain = arguments.get("domain")
     _log.debug("TOOL invoke", fn="hass_list_entities", domain=domain)
 
@@ -322,7 +357,14 @@ Pass lights array with per-light settings.""",
     }
 )
 async def hass_execute_scene_tool(arguments: dict[str, Any]) -> Sequence[TextContent]:
+    """Execute a predefined or custom lighting scene.
 
+    Args:
+        arguments: Dict with scene name or custom_lights array
+
+    Returns:
+        TextContent with scene execution result
+    """
     scene = arguments.get("scene")
     custom_lights = arguments.get("custom_lights", [])
     _log.debug("TOOL invoke", fn="hass_execute_scene", scene=scene, custom_cnt=len(custom_lights))

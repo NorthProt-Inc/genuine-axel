@@ -41,8 +41,11 @@ class SessionArchive:
 
             try:
                 yield self._connection
-            except Exception:
-                self._connection.rollback()
+            except Exception as e:
+                try:
+                    self._connection.rollback()
+                except Exception as rollback_err:
+                    _log.error("Rollback also failed", original=str(e), rollback=str(rollback_err))
                 raise
 
     def _init_db(self):
@@ -171,7 +174,18 @@ class SessionArchive:
         timestamp: str,
         emotional_context: str = "neutral"
     ) -> bool:
-        """매 턴 즉시 저장 - 중복 방지 포함"""
+        """Save a message immediately with duplicate prevention.
+
+        Args:
+            session_id: Session identifier
+            role: Message role (user/assistant)
+            content: Message content
+            timestamp: ISO timestamp
+            emotional_context: Emotional tone
+
+        Returns:
+            True if saved successfully
+        """
         try:
             # 텍스트 정제 (이모지, 특수문자 제거)
             content = sanitize_memory_text(content)
@@ -210,7 +224,21 @@ class SessionArchive:
         ended_at: datetime,
         messages: List[Dict] = None
     ) -> bool:
-        """세션 저장 - messages는 messages 테이블에 직접 저장"""
+        """Save session data with messages stored directly in messages table.
+
+        Args:
+            session_id: Session identifier
+            summary: Session summary (unused, stored as NULL)
+            key_topics: List of key conversation topics
+            emotional_tone: Overall emotional tone
+            turn_count: Number of conversation turns
+            started_at: Session start time
+            ended_at: Session end time
+            messages: List of message dicts
+
+        Returns:
+            True if saved successfully
+        """
         expires_at = datetime.now(VANCOUVER_TZ) + timedelta(days=MESSAGE_EXPIRY_DAYS)
 
         try:
@@ -379,7 +407,15 @@ class SessionArchive:
             return []
 
     def get_recent_summaries(self, limit: int = 5, max_tokens: int = 2000) -> str:
-        """messages 테이블에서 직접 최근 대화 조회 (날짜별 그룹핑)"""
+        """Retrieve recent conversations from messages table grouped by date.
+
+        Args:
+            limit: Maximum sessions to include
+            max_tokens: Token budget for output
+
+        Returns:
+            Formatted string with date-grouped conversation summaries
+        """
         try:
             with self._get_connection() as conn:
                 conn.row_factory = sqlite3.Row
@@ -513,7 +549,17 @@ class SessionArchive:
         limit: int = 10,
         max_tokens: int = 3000
     ) -> str:
-        """messages 테이블에서 직접 날짜 범위로 조회"""
+        """Query messages by date range directly from messages table.
+
+        Args:
+            from_date: Start date (YYYY-MM-DD)
+            to_date: End date (YYYY-MM-DD), defaults to from_date
+            limit: Maximum messages to return
+            max_tokens: Token budget for output
+
+        Returns:
+            Formatted string with messages in date range
+        """
         if not to_date:
             to_date = from_date
 
@@ -586,15 +632,20 @@ class SessionArchive:
             return None
 
     async def summarize_expired(self, llm_client=None) -> Dict[str, int]:
-        """
-        MESSAGE_ARCHIVE_AFTER_DAYS 지난 세션의 메시지를 축약 처리:
-        1. 만료된 세션의 메시지 조회
-        2. LLM으로 세션 단위 요약 생성
-        3. 원본 메시지를 archived_messages로 이동
-        4. sessions.summary에 요약 저장
-        5. messages 테이블에서 원본 삭제
+        """Archive and summarize messages from expired sessions.
 
-        Returns: {"sessions_processed": N, "messages_archived": M}
+        Workflow:
+        1. Query messages from sessions past MESSAGE_ARCHIVE_AFTER_DAYS
+        2. Generate LLM summary per session
+        3. Move original messages to archived_messages table
+        4. Store summary in sessions.summary
+        5. Delete originals from messages table
+
+        Args:
+            llm_client: Optional LLM client for summary generation
+
+        Returns:
+            Dict with sessions_processed and messages_archived counts
         """
         result = {"sessions_processed": 0, "messages_archived": 0}
 
@@ -691,7 +742,15 @@ class SessionArchive:
         return result
 
     async def _generate_session_summary(self, messages: List[Any], llm_client=None) -> Optional[str]:
-        """세션 메시지들을 LLM으로 요약"""
+        """Generate LLM summary from session messages.
+
+        Args:
+            messages: List of message records
+            llm_client: Optional LLM client
+
+        Returns:
+            Summary string or None on failure
+        """
         if not messages:
             return None
 
@@ -740,7 +799,11 @@ class SessionArchive:
         return 0
 
     def get_stats(self) -> Dict[str, Any]:
-        """messages 테이블에서 직접 통계 조회"""
+        """Get statistics directly from messages table.
+
+        Returns:
+            Dict with session/message counts and expiry info
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.execute("SELECT COUNT(*) FROM sessions")

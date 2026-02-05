@@ -21,3 +21,6 @@ playwright>=1.40.0
 markdownify>=0.12.1
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
+# Qwen3-TTS (local)
+qwen_tts @ file:///home/northprot/projects/axel-voice/Qwen3-TTS
+soundfile

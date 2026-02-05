@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""메시지 정리 스크립트 - 병렬 처리 버전
-
-API 키 3개 로테이션 + 체크포인트 + ThreadPoolExecutor 병렬 처리
-"""
-
 import sqlite3
 import json
 import os

@@ -1,11 +1,11 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from fastapi.responses import Response
 from pydantic import BaseModel
-from typing import Optional, Literal
-import base64
+from typing import Optional
 import re
-import uuid
-import time
+import subprocess
+import tempfile
+import os
 from backend.core.logging import get_logger
 from backend.config import MAX_AUDIO_BYTES
 from backend.api.deps import require_api_key
@@ -13,116 +13,105 @@ from backend.api.utils import read_upload_file
 
 _logger = get_logger("api.audio")
 
-def clean_text_for_tts(text: str) -> str:
 
+def clean_text_for_tts(text: str) -> str:
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
     text = re.sub(r'\*(.+?)\*', r'\1', text)
     text = re.sub(r'`(.+?)`', r'\1', text)
     text = re.sub(r'#{1,6}\s*', '', text)
     text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
     text = re.sub(r'```[\s\S]*?```', '', text)
-
     text = re.sub(r'[^\w\s가-힣ㄱ-ㅎㅏ-ㅣ,.!?;:\'\"()~\-]', '', text)
-
     text = re.sub(r'\s+', ' ', text).strip()
-
     return text
+
+
+def convert_wav_to_mp3(wav_bytes: bytes) -> bytes:
+    """Convert WAV audio to MP3 using ffmpeg.
+
+    Args:
+        wav_bytes: Raw WAV audio data
+
+    Returns:
+        MP3 encoded audio bytes
+    """
+    wav_path = tempfile.mktemp(suffix=".wav")
+    mp3_path = wav_path.replace(".wav", ".mp3")
+
+    try:
+        with open(wav_path, "wb") as f:
+            f.write(wav_bytes)
+
+        subprocess.run([
+            "ffmpeg", "-y", "-i", wav_path,
+            "-codec:a", "libmp3lame", "-qscale:a", "2",
+            mp3_path
+        ], check=True, capture_output=True)
+
+        with open(mp3_path, "rb") as f:
+            return f.read()
+    finally:
+        if os.path.exists(wav_path):
+            os.unlink(wav_path)
+        if os.path.exists(mp3_path):
+            os.unlink(mp3_path)
+
 
 router = APIRouter(tags=["Audio"], dependencies=[Depends(require_api_key)])
 
-OPENAI_VOICES = ["alloy", "ash", "ballad", "cedar", "coral", "echo", "fable", "marin", "nova", "onyx", "sage", "shimmer", "verse"]
-LOCAL_VOICES = ["axel-voice", "axel"]
-ALL_VOICES = OPENAI_VOICES + LOCAL_VOICES
-DEFAULT_VOICE = "axel"
 
 class SpeechRequest(BaseModel):
-
-    model: str = "northprot-tts"
+    model: str = "qwen3-tts"
     input: str
-    voice: str = DEFAULT_VOICE
-    instructions: Optional[str] = None
-    speed: float = 1.0
-    response_format: Optional[str] = "mp3"
+    voice: str = "axel"  # 무시됨, 호환성용
+    response_format: Optional[str] = "mp3"  # Open WebUI 호환
 
-@router.post("/v1/audio/speech", summary="Generate speech from text (NorthProt-TTS)")
+
+@router.post("/v1/audio/speech", summary="Generate speech (Qwen3-TTS)")
 async def create_speech(request: SpeechRequest):
-
-    start_time = time.time()
-    request_id = str(uuid.uuid4())
-
     if not request.input or not request.input.strip():
         raise HTTPException(status_code=400, detail="Input text is required")
 
-    voice = request.voice.lower()
-
-    _logger.info(
-        f"TTS request (NorthProt-TTS Active)",
-        voice=voice,
-        model=request.model,
-        chars=len(request.input)
-    )
+    _logger.info("TTS request", chars=len(request.input))
 
     try:
-
-        output_format = request.response_format or "mp3"
-        content_type_map = {
-            "mp3": "audio/mpeg",
-            "opus": "audio/opus",
-            "aac": "audio/aac",
-            "flac": "audio/flac",
-            "wav": "audio/wav",
-            "pcm": "audio/pcm"
-        }
-        content_type = content_type_map.get(output_format, "audio/mpeg")
-
         cleaned_text = clean_text_for_tts(request.input)
 
-        from media.rvc_tts import RVCTTS
-        tts = RVCTTS(
-            voice="axel",
-            speed=request.speed or 1.0
-        )
-        audio_b64, _ = await tts.synthesize(
-            text=cleaned_text,
-            output_format=output_format
-        )
+        from backend.media.qwen_tts import Qwen3TTS
+        tts = Qwen3TTS()
+        audio_bytes, sr = await tts.synthesize(cleaned_text)
 
-        if not audio_b64:
+        if not audio_bytes:
             raise HTTPException(status_code=500, detail="TTS synthesis failed")
 
-        audio_bytes = base64.b64decode(audio_b64)
+        # mp3 변환
+        if request.response_format == "mp3":
+            audio_bytes = convert_wav_to_mp3(audio_bytes)
+            media_type = "audio/mpeg"
+            filename = "speech.mp3"
+        else:
+            media_type = "audio/wav"
+            filename = "speech.wav"
 
         return Response(
             content=audio_bytes,
-            media_type=content_type,
-            headers={
-                "Content-Disposition": f"attachment; filename=speech.{output_format}"
-            }
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
 
     except Exception as e:
         _logger.error("TTS error", error=str(e))
         raise HTTPException(status_code=500, detail=f"TTS error: {str(e)}")
 
-VOICE_MAP = {v: v.title() for v in ALL_VOICES}
 
 @router.get("/v1/audio/voices")
 async def list_voices():
+    return {"voices": [{"id": "axel", "name": "Axel", "gender": "male"}]}
 
-    return {
-        "voices": [
-            {
-                "id": k,
-                "name": v,
-                "gender": "male" if k in ["alloy", "echo", "fable", "onyx", "imp", "axel", "axel-voice"] else "female"
-            }
-            for k, v in VOICE_MAP.items()
-        ]
-    }
 
 class TranscriptionResponse(BaseModel):
-
     text: str
+
 
 @router.post("/v1/audio/transcriptions")
 async def create_transcription(
@@ -131,21 +120,13 @@ async def create_transcription(
     language: str = Form(None),
     response_format: str = Form("json"),
 ):
-
     try:
         audio_data = await read_upload_file(file, MAX_AUDIO_BYTES)
         filename = file.filename or "audio.webm"
 
-        _logger.info(
-            "STT request",
-            model=model,
-            filename=filename,
-            size=len(audio_data),
-            language=language
-        )
+        _logger.info("STT request", model=model, filename=filename, size=len(audio_data))
 
-        from media import transcribe_audio
-
+        from backend.media import transcribe_audio
         result = await transcribe_audio(audio_data, language)
 
         if not result:
@@ -156,11 +137,7 @@ async def create_transcription(
         if response_format == "text":
             return Response(content=result, media_type="text/plain")
         elif response_format == "verbose_json":
-            return {
-                "text": result,
-                "language": "auto",
-                "duration": None,
-            }
+            return {"text": result, "language": "auto", "duration": None}
         else:
             return {"text": result}
 

@@ -1,11 +1,11 @@
-"""Opus 관련 공통 데이터 타입."""
+"""Common data types for Opus integration."""
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 
 @dataclass
 class OpusResult:
-    """Opus CLI 실행 결과."""
+    """Result from Opus CLI execution."""
     success: bool
     output: str
     error: Optional[str] = None
@@ -16,7 +16,7 @@ class OpusResult:
 
 @dataclass
 class DelegationResult:
-    """Opus 위임 작업 결과."""
+    """Result from Opus delegation task."""
     success: bool
     response: str
     files_included: List[str] = field(default_factory=list)
@@ -26,7 +26,7 @@ class DelegationResult:
 
 @dataclass
 class OpusHealthStatus:
-    """Opus 서비스 상태."""
+    """Opus service health status."""
     available: bool
     message: str
     version: Optional[str] = None

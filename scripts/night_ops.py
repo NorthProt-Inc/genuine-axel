@@ -17,14 +17,24 @@ API_KEY = os.getenv("AXNMIHN_API_KEY") or os.getenv("API_KEY")
 REPORTS_DIR = CRON_REPORTS_DIR
 SUMMARY_LOG = CRON_LOG_PATH
 
-REQUEST_TIMEOUT = 2700.0
+REQUEST_TIMEOUT = 300.0
 MAX_RETRIES = 3
 RETRY_DELAY = 60
 
-NIGHT_SHIFT_PROMPT = """아무거나 계속 새로운 정보 찾아서 학습해.
-회사에 도움 될만한 것도 좋고, 네 발전에 도움 될만한 것도 좋아.
-다만 최신 정보들로 (2025~2026년) 난 자는 중이다. 이거 Cron으로 돌아가는거야ㅋㅋㅋ.
-괜히 나 안잔다고 핀잔주지 말어ㅋㅋ"""
+NIGHT_QUERIES = [
+    "2026 아무거나"
+]
+
+# 시간대 기반 쿼리 선택
+hour = datetime.now().hour
+query = NIGHT_QUERIES[hour % len(NIGHT_QUERIES)]
+
+NIGHT_SHIFT_PROMPT = f"""다음 주제를 조사: {query}
+
+오푸스가 프롬프트 거지같이 써놔서 루트 어드민 이종민이 직접 편집한다. 걍 맘대로 휘집고 놀아ㅋㅋ.
+아 참고로 이거 night_ops.py 후속작임. 구글 딥리서치는 이제 비싸니까 네가 하는걸로 하자고. 알다시피 크론잡이고 난 자는 중이다.
+
+[AXEL_SUMMARY_START] 와 [AXEL_SUMMARY_END] 태그 사이에 요약."""
 
 def log(message: str) -> None:
 
@@ -150,7 +160,7 @@ def main() -> int:
 
     log("=" * 60)
     log("NIGHT SHIFT DAEMON ACTIVATED")
-    log("Engine: Axel Backend + Google Deep Research")
+    log("Engine: Axel Backend + Free Deep Research (DuckDuckGo)")
     log("=" * 60)
 
     ensure_reports_dir()

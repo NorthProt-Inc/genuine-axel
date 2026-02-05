@@ -4,6 +4,7 @@ import random
 import re
 import sys
 import os
+import time
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote_plus, urljoin, urlparse
@@ -22,6 +23,11 @@ from backend.core.research_artifacts import (
     should_save_as_artifact,
     list_artifacts,
     ARTIFACT_THRESHOLD,
+)
+from backend.config import (
+    RESEARCH_PAGE_TIMEOUT_MS,
+    RESEARCH_NAVIGATION_TIMEOUT_MS,
+    RESEARCH_MAX_CONTENT_LENGTH,
 )
 
 _log = get_logger("protocols.research")
@@ -53,10 +59,10 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
 
-PAGE_TIMEOUT_MS = 240000
-NAVIGATION_TIMEOUT_MS = 600000
+PAGE_TIMEOUT_MS = RESEARCH_PAGE_TIMEOUT_MS
+NAVIGATION_TIMEOUT_MS = RESEARCH_NAVIGATION_TIMEOUT_MS
 
-MAX_CONTENT_LENGTH = 75000
+MAX_CONTENT_LENGTH = RESEARCH_MAX_CONTENT_LENGTH
 EXCLUDED_TAGS = [
     'script', 'style', 'noscript', 'iframe', 'svg', 'path', 'meta', 'link',
     'header', 'footer', 'nav', 'aside', 'advertisement', 'ads', 'ad-container',
@@ -76,6 +82,9 @@ class BrowserManager:
         self._context = None
         self._use_count = 0
         self._max_uses = 50
+        self._last_used: float = 0.0
+        self._idle_timeout: int = 300  # 5분
+        self._idle_checker: Optional[asyncio.Task] = None
 
     @classmethod
     async def get_instance(cls) -> "BrowserManager":
@@ -121,9 +130,32 @@ class BrowserManager:
                 _log.info("Browser launched successfully")
 
             self._use_count += 1
+            self._last_used = time.time()
+
+            if self._idle_checker is None or self._idle_checker.done():
+                self._start_idle_checker()
+
             return await self._context.new_page()
 
-    async def _cleanup(self):
+    def _start_idle_checker(self):
+
+        async def _check_idle():
+            while True:
+                await asyncio.sleep(60)
+                async with self._lock:
+                    if self._playwright is None:
+                        break
+                    elapsed = time.time() - self._last_used
+                    if elapsed >= self._idle_timeout:
+                        _log.info("Browser idle cleanup",
+                                  idle_sec=int(elapsed),
+                                  uses=self._use_count)
+                        await self._cleanup_inner()
+                        break
+
+        self._idle_checker = asyncio.create_task(_check_idle())
+
+    async def _cleanup_inner(self):
 
         try:
             if self._context:
@@ -139,6 +171,14 @@ class BrowserManager:
             self._browser = None
             self._context = None
             self._use_count = 0
+            self._last_used = 0.0
+            self._idle_checker = None
+
+    async def _cleanup(self):
+
+        if self._idle_checker and not self._idle_checker.done():
+            self._idle_checker.cancel()
+        await self._cleanup_inner()
 
     async def close(self):
 
@@ -381,8 +421,22 @@ async def _visit_page(url: str) -> str:
 
     except asyncio.TimeoutError:
         dur_ms = int((time.time() - start_time) * 1000)
-        _log.error("Page visit timeout", url=url[:80], dur_ms=dur_ms)
-        return f"Error: Page load timed out after {NAVIGATION_TIMEOUT_MS/1000}s: {url}"
+        _log.warning("Page visit timeout, extracting partial content", url=url[:80], dur_ms=dur_ms)
+        try:
+            html = await page.content()
+            title = await page.title()
+            markdown = html_to_markdown(html, url)
+            if markdown and len(markdown.strip()) > 100:
+                output = f"# {title}\n\n"
+                output += f"**Source:** {url}\n\n"
+                output += f"**Note:** Page timed out after {dur_ms/1000:.1f}s, partial content returned.\n\n"
+                output += "---\n\n"
+                output += markdown
+                _log.info("Page visit timeout but partial content extracted", url=url[:80], content_len=len(output))
+                return process_content_for_artifact(url, output)
+        except Exception as e:
+            _log.debug("Partial content extraction failed", url=url[:50], error=str(e))
+        return f"Error: Page load timed out after {NAVIGATION_TIMEOUT_MS/1000}s (no usable content): {url}"
     except Exception as e:
         dur_ms = int((time.time() - start_time) * 1000)
         _log.error("Page visit error", url=url[:80], dur_ms=dur_ms, error=str(e))
@@ -391,8 +445,8 @@ async def _visit_page(url: str) -> str:
         if page:
             try:
                 await page.close()
-            except Exception:
-                pass
+            except Exception as e:
+                _log.warning("Page close failed, potential leak", url=url[:50], error=str(e))
 
 async def _deep_dive(query: str) -> str:
 

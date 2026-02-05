@@ -6,7 +6,7 @@ from pathlib import Path
 import threading
 import uuid
 import json
-from backend.config import WORKING_MEMORY_PATH
+from backend.config import WORKING_MEMORY_PATH, CONTEXT_WORKING_TURNS, CONTEXT_SQL_PERSIST_TURNS
 from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver, ensure_aware
 from backend.core.utils.text_utils import sanitize_memory_text
 from backend.core.logging import get_logger
@@ -69,8 +69,8 @@ class TimestampedMessage:
 
 class WorkingMemory:
 
-    MAX_TURNS = 30
-    SQL_PERSIST_TURNS = 10
+    MAX_TURNS = CONTEXT_WORKING_TURNS
+    SQL_PERSIST_TURNS = CONTEXT_SQL_PERSIST_TURNS
     PERSISTENCE_PATH = str(WORKING_MEMORY_PATH)
 
     def __init__(self):

@@ -109,8 +109,12 @@ async def populate_knowledge_graph(
                 checkpoint = json.load(f)
                 start_batch = checkpoint.get("last_batch", 0)
                 print(f"       Resuming from checkpoint: batch {start_batch + 1}")
-        except:
-            pass
+        except json.JSONDecodeError as e:
+            print(f"       Warning: Checkpoint JSON invalid, starting fresh: {e}")
+        except FileNotFoundError:
+            pass  # 체크포인트 없음은 정상
+        except Exception as e:
+            print(f"       Warning: Checkpoint read failed: {e}")
 
     for i in range(0, total, batch_size):
         batch = documents[i:i + batch_size]
