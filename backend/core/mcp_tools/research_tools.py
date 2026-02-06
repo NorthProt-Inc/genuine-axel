@@ -116,24 +116,7 @@ async def visit_webpage(arguments: dict[str, Any]) -> Sequence[TextContent]:
 @register_tool(
     "deep_research",
     category="research",
-    description="""무료 웹 리서치 (DuckDuckGo + Playwright 브라우저).
-
-[필수 사용 조건] 사용자가 다음 키워드 언급 시 반드시 이 도구 호출:
-- "검색해줘", "찾아줘", "리서치해줘" (o4/OpenAI 언급 없이)
-- "웹에서 찾아", "인터넷 검색"
-- "deep_research" (도구 이름 직접 언급)
-
-[동작]
-1. DuckDuckGo 검색 실행
-2. 상위 3개 페이지 방문 (Playwright 브라우저)
-3. 내용 추출 및 리포트 생성
-
-[용도]
-- 일반적인 정보 검색
-- 뉴스/블로그 조사
-- 무료 리서치 (유료 API 아님)
-
-프리미엄 리서치는 google_deep_research 사용.""",
+    description="Free web research via DuckDuckGo + Playwright. Searches and visits top 3 pages.",
     input_schema={
         "type": "object",
         "properties": {
@@ -172,22 +155,7 @@ async def deep_research(arguments: dict[str, Any]) -> Sequence[TextContent]:
 @register_tool(
     "tavily_search",
     category="research",
-    description="""Tavily 빠른 검색 (AI 요약 포함).
-
-[필수 사용 조건] 사용자가 다음 키워드 언급 시 반드시 이 도구 호출:
-- "Tavily로 검색", "빠른 검색"
-- "tavily_search" (도구 이름 직접 언급)
-
-[특징]
-- AI가 검색 결과 요약해서 제공
-- deep_research보다 빠름
-- 간단한 팩트 체크에 적합
-
-[파라미터]
-- query: 검색어
-- search_depth: basic(빠름) / advanced(상세)
-
-TAVILY_API_KEY 필요.""",
+    description="AI-powered search with summaries via Tavily API.",
     input_schema={
         "type": "object",
         "properties": {

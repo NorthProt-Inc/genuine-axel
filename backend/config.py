@@ -12,7 +12,11 @@ APP_VERSION = os.getenv("AXNMIHN_VERSION", "1.0")
 DEFAULT_GEMINI_MODEL = os.getenv("DEFAULT_GEMINI_MODEL", "gemini-3-flash-preview")
 DEFAULT_THINKING_LEVEL = "high"
 
-MODEL_NAME = DEFAULT_GEMINI_MODEL
+# Chat response model (separate from utility tasks)
+CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3-pro-preview")
+CHAT_THINKING_LEVEL = "low"
+
+MODEL_NAME = CHAT_MODEL
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-001")
 
 SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "tavily")
@@ -205,6 +209,16 @@ RESEARCH_NAVIGATION_TIMEOUT_MS = _get_int_env("RESEARCH_NAVIGATION_TIMEOUT_MS", 
 RESEARCH_MAX_CONTENT_LENGTH = _get_int_env("RESEARCH_MAX_CONTENT_LENGTH", 75000)
 RESEARCH_POLL_INTERVAL = _get_int_env("RESEARCH_POLL_INTERVAL", 30)
 RESEARCH_MAX_POLL_TIME = _get_int_env("RESEARCH_MAX_POLL_TIME", 1800)
+
+# =============================================================================
+# MCP Tool Visibility (affects MCP schema only, not internal callers)
+# =============================================================================
+MCP_DISABLED_TOOLS: set[str] = set(
+    filter(None, os.getenv("MCP_DISABLED_TOOLS", "").split(","))
+)
+MCP_DISABLED_CATEGORIES: set[str] = set(
+    filter(None, os.getenv("MCP_DISABLED_CATEGORIES", "").split(","))
+)
 
 # =============================================================================
 # MCP Tool Execution

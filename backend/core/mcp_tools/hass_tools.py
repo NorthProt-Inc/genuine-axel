@@ -8,20 +8,7 @@ _log = get_logger("mcp.hass_tools")
 @register_tool(
     "hass_control_light",
     category="hass",
-    description="""조명 제어 (WiZ RGB).
-
-[필수 사용 조건] 사용자가 다음 키워드 언급 시 반드시 이 도구 호출:
-- "불 켜줘", "불 꺼줘", "조명 켜", "조명 꺼"
-- "밝기 조절", "색 바꿔", "빨간색으로"
-- "hass_control_light" (도구 이름 직접 언급)
-
-[파라미터]
-- entity_id: 'all'(전체) 또는 특정 조명 ID
-- action: turn_on / turn_off
-- brightness: 0-100 (밝기 %)
-- color: 색상 (red, blue, #FF0000 등)
-
-말로만 하지 말고 반드시 function_call 생성할 것.""",
+    description="Control WiZ RGB lights (on/off, brightness, color).",
     input_schema={
         "type": "object",
         "properties": {
@@ -81,15 +68,7 @@ async def hass_control_light_tool(arguments: dict[str, Any]) -> Sequence[TextCon
 @register_tool(
     "hass_control_device",
     category="hass",
-    description="""기기 제어 (팬, 스위치, 가습기).
-
-[필수 사용 조건] 사용자가 다음 키워드 언급 시 반드시 이 도구 호출:
-- "팬 켜줘", "팬 꺼줘", "공기청정기 켜"
-- "가습기 켜", "스위치 꺼"
-
-[파라미터]
-- entity_id: 기기 ID (예: fan.vital_100s_series)
-- action: turn_on / turn_off""",
+    description="Control devices (fan, switch, humidifier) on/off.",
     input_schema={
         "type": "object",
         "properties": {

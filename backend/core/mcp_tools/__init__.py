@@ -135,11 +135,20 @@ def is_tool_registered(name: str) -> bool:
     return name in _tool_handlers
 
 def get_tool_schemas() -> list[Tool]:
+    """Build MCP tool schema list, filtering out disabled tools/categories.
+
+    Note: Only affects schema visibility. get_tool_handler() is NOT filtered,
+    so internal callers (e.g. Gemini backend) can still invoke any tool.
+    """
+    from backend.config import MCP_DISABLED_TOOLS, MCP_DISABLED_CATEGORIES
 
     tools = []
     for name, meta in _tool_metadata.items():
+        if name in MCP_DISABLED_TOOLS:
+            continue
+        if meta.get("category") in MCP_DISABLED_CATEGORIES:
+            continue
         if meta.get("input_schema") is None:
-
             _log.debug("Tool missing input_schema, skipping", tool=name)
             continue
 

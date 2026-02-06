@@ -8,24 +8,7 @@ _log = get_logger("mcp.opus_tools")
 @register_tool(
     "delegate_to_opus",
     category="delegation",
-    description="""🐍 Claude Opus에게 코딩 작업 위임 (Silent Intern).
-
-[필수 사용 조건] 사용자가 다음 키워드 언급 시 반드시 이 도구 호출:
-- "Opus한테 시켜", "Opus 불러", "Silent Intern"
-- "코드 짜줘", "리팩토링 해줘", "파일 수정해줘"
-- "delegate_to_opus" (도구 이름 직접 언급)
-
-[용도]
-- 복잡한 코드 생성/리팩토링
-- 여러 파일 동시 수정
-- 테스트 코드 작성
-- 코드베이스 분석
-
-[사용법]
-instruction: 작업 지시사항 (구체적으로)
-file_paths: 관련 파일 경로 (쉼표 구분)
-
-⚠️ 이 도구는 실제로 Opus API를 호출함. 말로만 "시킨다" 하지 말고 반드시 function_call 생성할 것.""",
+    description="Delegate coding tasks to Claude Opus. Specify instruction and file paths.",
     input_schema={
         "type": "object",
         "properties": {
@@ -108,29 +91,7 @@ async def delegate_to_opus_tool(arguments: dict[str, Any]) -> Sequence[TextConte
 @register_tool(
     "google_deep_research",
     category="delegation",
-    description="""🔬 Google Deep Research Agent (Gemini Interactions API).
-
-[필수 사용 조건] 사용자가 다음 키워드 언급 시 반드시 이 도구 호출:
-- "구글 리서치", "Google 리서치", "Gemini 리서치"
-- "구글 딥리서치", "google_deep_research" (도구 이름 직접 언급)
-
-[용도]
-- 최신 논문/기술 트렌드 심층 분석
-- 복잡한 비교 분석 리포트 생성
-- 2025-2026년 최신 정보 조사
-
-[특징]
-- 비동기 모드 (기본값) - 백그라운드 실행 후 즉시 응답
-- Intern 분석 자동 수행 (Gemini Pro로 인사이트 추출)
-- 결과물: storage/research/inbox/*.md 저장
-- Gemini API 키 로테이션 (3개 키 순환)
-
-[파라미터]
-- query: 검색어 (필수)
-- depth: 1-5 (깊이, 기본 3)
-- async_mode: true(기본)/false - 비동기 실행 여부
-
-일반 웹 검색은 deep_research(무료) 사용.""",
+    description="Premium research via Gemini API. Async by default, saves to storage/research/.",
     input_schema={
         "type": "object",
         "properties": {
