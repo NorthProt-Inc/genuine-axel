@@ -455,6 +455,7 @@ systemctl --user status axnmihn-backend axnmihn-mcp axnmihn-research --no-pager 
 nvidia-smi                      # GPU 상태 확인
 watch -n 1 nvidia-smi           # GPU 상태 실시간 모니터링
 sudo nvidia-smi -pl 350         # Power Limit 350W로 올리기
+systemctl --user daemon-reload && nvidia-smi --query-compute-apps=pid,name,used_memory --format=csv,noheader 2>/dev/null || echo "GPU clear
 
 # GPU 요약 (온도, 메모리, 사용률)
 nvidia-smi --query-gpu=name,temperature.gpu,memory.used,memory.total,utilization.gpu --format=csv
@@ -574,7 +575,6 @@ python scripts/regenerate_persona.py
 | run_migrations.py | DB 스키마 마이그레이션 | `python scripts/run_migrations.py` |
 | *(삭제됨)* | 터미널 채팅 → `axel-chat` (Rust CLI) | `axel-chat` |
 | cron_memory_gc.sh | 메모리 GC cron 래퍼 | `./scripts/cron_memory_gc.sh` |
-| cron_audio_cleanup.sh | 오디오/로그 캐시 정리 | `./scripts/cron_audio_cleanup.sh` |
 
 ### axel-chat 사용법 (Rust CLI)
 
@@ -904,7 +904,6 @@ MCP 연결 실패
 | 스케줄 | 작업 | 설명 |
 |--------|------|------|
 | `0 4 * * *` | `cron_memory_gc.sh` | 메모리 GC - 매일 오전 4시 PST |
-| `0 5 * * *` | `cron_audio_cleanup.sh` | 오디오/로그 캐시 정리 - 매일 오전 5시 |
 | `50 0-5 * * *` | `night_ops.py` | Night Shift - 0:50~5:50 PST (6회/일) |
 | `0 0 * * *` | `logrotate` | 로그 로테이션 - 매일 자정 |
 | `10 2 * * *` | `daily_cleanup.sh` | 시스템 전체 정리 - 오전 2:10 |

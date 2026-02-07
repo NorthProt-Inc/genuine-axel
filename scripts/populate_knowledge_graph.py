@@ -7,7 +7,6 @@ import argparse
 import shutil
 import json
 from datetime import datetime
-
 from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -17,11 +16,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from backend.config import DATA_ROOT, SQLITE_MEMORY_PATH, KNOWLEDGE_GRAPH_PATH, DEFAULT_GEMINI_MODEL
-
 from backend.memory.permanent import LongTermMemory
 from backend.memory.recent import SessionArchive
 from backend.memory.graph_rag import GraphRAG, KnowledgeGraph
-from backend.core.utils.gemini_wrapper import GenerativeModelWrapper
+from backend.core.utils.gemini_client import get_gemini_client
 
 async def populate_knowledge_graph(
     batch_size: int = 10,
@@ -37,8 +35,8 @@ async def populate_knowledge_graph(
 
     print("\n[1/5] Initializing components...")
 
-    model = GenerativeModelWrapper(client_or_model=DEFAULT_GEMINI_MODEL)
-    fallback_model = model
+    client = get_gemini_client()
+    fallback_client = client
     ltm = LongTermMemory()
     session_archive = SessionArchive()
 
@@ -53,7 +51,7 @@ async def populate_knowledge_graph(
             os.remove(kg_path)
 
     kg = KnowledgeGraph(persist_path=kg_path)
-    gr = GraphRAG(model=model, graph=kg)
+    gr = GraphRAG(client=client, model_name=DEFAULT_GEMINI_MODEL, graph=kg)
 
     print(f"       LTM:     {ltm.get_stats().get('total_memories', 0)} memories")
     print(f"       SQLite:  {session_archive.get_stats().get('total_sessions', 0)} sessions")
@@ -143,7 +141,7 @@ async def populate_knowledge_graph(
 
                 if "error" in result:
 
-                    gr_fallback = GraphRAG(model=fallback_model, graph=kg)
+                    gr_fallback = GraphRAG(client=fallback_client, model_name=DEFAULT_GEMINI_MODEL, graph=kg)
                     result = await gr_fallback.extract_and_store(doc[:800], source=source)
                     if "error" not in result:
                         fallback_uses += 1

@@ -292,7 +292,7 @@ axnmihn/
 |   |       +-- cache.py       # Caching utilities
 |   |       +-- circuit_breaker.py # Circuit breaker pattern
 |   |       +-- file_utils.py
-|   |       +-- gemini_wrapper.py
+|   |       +-- gemini_client.py  # Gemini SDK client singleton
 |   |       +-- http_pool.py
 |   |       +-- rate_limiter.py
 |   |       +-- retry.py
@@ -350,7 +350,6 @@ axnmihn/
 |   +-- db_maintenance.py      # Database maintenance
 |   +-- run_migrations.py      # Database migrations
 |   +-- cron_memory_gc.sh      # Memory GC cron wrapper
-|   +-- cron_audio_cleanup.sh  # Audio/log cache cleanup
 +-- data/                       # Runtime data
 |   +-- working_memory.json    # Session memory
 |   +-- chroma_db/             # Vector DB

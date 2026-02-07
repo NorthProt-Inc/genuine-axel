@@ -126,7 +126,7 @@ def strip_xml_tags(text: str) -> str:
     # Clean up excessive blank lines left behind
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
 
-    return cleaned.strip()
+    return cleaned.strip('\n')
 
 
 def has_partial_tool_tag(text: str) -> bool:

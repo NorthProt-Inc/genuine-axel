@@ -49,7 +49,7 @@ class ChatRequest:
     """Request object for chat processing."""
 
     user_input: str
-    model_choice: str = "gemini"
+    model_choice: str = "anthropic"
     tier: str = "axel"
     enable_audio: bool = False
     enable_search: bool = False
@@ -339,7 +339,7 @@ class ChatHandler:
         """
         from backend.core.mcp_client import get_mcp_client
         mcp_client = get_mcp_client()
-        available_tools = await mcp_client.get_gemini_tools()
+        available_tools = await mcp_client.get_anthropic_tools()
         return mcp_client, available_tools
 
     def _build_final_prompt(

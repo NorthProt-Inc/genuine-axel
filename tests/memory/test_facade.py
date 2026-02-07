@@ -61,7 +61,7 @@ class TestLongTermMemoryFacade:
     """Test cases for LongTermMemory facade (unit tests with mocks)."""
 
     @pytest.fixture
-    def mock_ltm(self, mock_chromadb_collection, mock_genai_wrapper):
+    def mock_ltm(self, mock_chromadb_collection, mock_genai_client):
         """Create LongTermMemory with mocked components."""
         ltm = object.__new__(LongTermMemory)
 
@@ -75,7 +75,7 @@ class TestLongTermMemoryFacade:
         # Set up mock embedding service
         mock_embed = MagicMock(spec=EmbeddingService)
         mock_embed.get_embedding.return_value = [0.1] * 768
-        mock_embed.genai_wrapper = mock_genai_wrapper
+        mock_embed.client = mock_genai_client
         ltm._embedding_service = mock_embed
 
         # Set up other attributes

@@ -1,12 +1,14 @@
 from dataclasses import dataclass
 from typing import Dict, List, Literal
 from backend.core.logging import get_logger
+from backend.core.utils.text import truncate_text
 from backend.config import (
     BUDGET_SYSTEM_PROMPT,
     BUDGET_TEMPORAL,
     BUDGET_WORKING_MEMORY,
     BUDGET_LONG_TERM,
     BUDGET_GRAPHRAG,
+    BUDGET_SESSION_ARCHIVE,
 )
 
 _log = get_logger("core.ctx_opt")
@@ -53,6 +55,13 @@ TIER_BUDGETS: Dict[str, Dict[str, SectionBudget]] = {
         "graphrag": SectionBudget(
             name="관계 기반 지식",
             max_chars=BUDGET_GRAPHRAG,
+            priority=1,
+            overflow_strategy="truncate",
+            header_template="## {name}"
+        ),
+        "session_archive": SectionBudget(
+            name="최근 세션 기록",
+            max_chars=BUDGET_SESSION_ARCHIVE,
             priority=1,
             overflow_strategy="truncate",
             header_template="## {name}"
@@ -120,17 +129,7 @@ class ContextOptimizer:
         return self._truncate(content, budget.max_chars)
 
     def _truncate(self, content: str, max_chars: int) -> str:
-
-        if len(content) <= max_chars:
-            return content
-
-        suffix = "\n... (truncated)"
-        keep = max_chars - len(suffix)
-
-        if keep <= 0:
-            return content[:max_chars]
-
-        return content[:keep].rstrip() + suffix
+        return truncate_text(content, max_chars)
 
     def _summarize_overflow(self, content: str, max_chars: int) -> str:
 
@@ -258,7 +257,3 @@ def get_dynamic_system_prompt(tier: str, full_prompt: str) -> str:
         return full_prompt[:budget.max_chars - 20] + "\n... (truncated)"
 
     return full_prompt
-
-def estimate_tokens(text: str) -> int:
-
-    return len(text) // 4

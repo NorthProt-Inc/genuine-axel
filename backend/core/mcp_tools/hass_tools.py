@@ -12,7 +12,7 @@ _log = get_logger("mcp.hass_tools")
     input_schema={
         "type": "object",
         "properties": {
-            "entity_id": {"type": "string", "description": "Light entity (e.g., 'all', 'light.wiz_rgbw_tunable_77d6a0')"},
+            "entity_id": {"type": "string", "description": "Light entity ('all' for all lights, or entity_id from hass_list_entities)"},
             "action": {"type": "string", "enum": ["turn_on", "turn_off"], "description": "Action to perform"},
             "brightness": {"type": "integer", "minimum": 0, "maximum": 100, "description": "Brightness percentage (0-100)"},
             "color": {"type": "string", "description": "Color: hex (#FF0000), name (red), or hsl(240,100,50)"}
@@ -72,7 +72,7 @@ async def hass_control_light_tool(arguments: dict[str, Any]) -> Sequence[TextCon
     input_schema={
         "type": "object",
         "properties": {
-            "entity_id": {"type": "string", "description": "Device entity (e.g., 'fan.vital_100s_series')"},
+            "entity_id": {"type": "string", "description": "Device entity_id (use hass_list_entities to discover available devices)"},
             "action": {"type": "string", "enum": ["turn_on", "turn_off"], "description": "Action to perform"}
         },
         "required": ["entity_id", "action"]

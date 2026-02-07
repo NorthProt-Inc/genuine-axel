@@ -89,7 +89,7 @@ class HassControlDeviceInput(BaseModel):
     """Input schema for hass_control_device tool."""
 
     entity_id: str = Field(
-        description="Device entity ID (e.g., 'fan.vital_100s_series')"
+        description="Device entity ID (e.g., 'fan.device_name', use hass_list_entities to discover)"
     )
     action: DeviceAction = Field(
         description="Action to perform"
@@ -325,25 +325,3 @@ class DelegateToOpusInput(BaseModel):
         description="Model to use"
     )
 
-
-# === Helper function ===
-
-def validate_input(schema_class: type[BaseModel], arguments: dict) -> tuple[bool, BaseModel | str]:
-    """
-    Validate input against a Pydantic schema.
-
-    Returns:
-        Tuple of (success: bool, result: validated model or error message)
-    """
-    try:
-        validated = schema_class(**arguments)
-        return True, validated
-    except Exception as e:
-        error_msg = str(e)
-        # Extract just the error messages without the full traceback
-        if "validation error" in error_msg.lower():
-            lines = error_msg.split("\n")
-            # Get the meaningful error lines
-            errors = [line.strip() for line in lines if line.strip() and not line.startswith("For")]
-            error_msg = "; ".join(errors[:3])  # Limit to first 3 errors
-        return False, f"Validation Error: {error_msg}"

@@ -12,12 +12,19 @@ _log = get_logger("tools.system_observer")
 
 AXEL_ROOT = Path(__file__).resolve().parents[3]
 
-MAX_FILE_SIZE = 10 * 1024 * 1024
+# Read from same env vars as config.py (avoids circular import at module load)
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
-MAX_LOG_LINES = 1000
-
-MAX_SEARCH_RESULTS = 100
-
+MAX_FILE_SIZE = _env_int("MAX_FILE_SIZE", 10 * 1024 * 1024)
+MAX_LOG_LINES = _env_int("MAX_LOG_LINES", 1000)
+MAX_SEARCH_RESULTS = _env_int("MAX_SEARCH_RESULTS", 100)
 SEARCH_CONTEXT_LINES = 2
 
 ALLOWED_CODE_DIRS = [

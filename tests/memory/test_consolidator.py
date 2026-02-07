@@ -68,9 +68,11 @@ class TestMemoryConsolidator:
             ],
         }
 
-        # Mock decay calculator to return very low for first, high for second
+        # mem-002 has repetitions=5 (>= PRESERVE_REPETITIONS=3) so it goes
+        # to the preserve path, not the batch decay path.  Only mem-001
+        # reaches calculate_batch.
         calc = MagicMock(spec=AdaptiveDecayCalculator)
-        calc.calculate.side_effect = [0.01, 0.8]  # First below threshold, second above
+        calc.calculate_batch.return_value = [0.01]  # Below threshold → delete
 
         with patch(
             "backend.memory.permanent.consolidator.get_connection_count",
@@ -101,8 +103,10 @@ class TestMemoryConsolidator:
             ],
         }
 
+        # repetitions=5 >= PRESERVE_REPETITIONS → goes to preserve path,
+        # batch_data is empty, so calculate_batch is never called.
         calc = MagicMock(spec=AdaptiveDecayCalculator)
-        calc.calculate.return_value = 0.85  # Above threshold
+        calc.calculate_batch.return_value = []
 
         with patch(
             "backend.memory.permanent.consolidator.get_connection_count",
@@ -132,9 +136,9 @@ class TestMemoryConsolidator:
             ],
         }
 
-        # Low decay score but high access count protects it
+        # Low decay score but access_count=5 >= 3 protects from deletion
         calc = MagicMock(spec=AdaptiveDecayCalculator)
-        calc.calculate.return_value = 0.01  # Below threshold
+        calc.calculate_batch.return_value = [0.01]  # Below threshold
 
         with patch(
             "backend.memory.permanent.consolidator.get_connection_count",
@@ -164,8 +168,9 @@ class TestMemoryConsolidator:
             ],
         }
 
+        # repetitions=5 >= PRESERVE_REPETITIONS → goes to preserve path
         calc = MagicMock(spec=AdaptiveDecayCalculator)
-        calc.calculate.return_value = 0.5
+        calc.calculate_batch.return_value = []
 
         with patch(
             "backend.memory.permanent.consolidator.get_connection_count",
@@ -209,8 +214,10 @@ class TestMemoryConsolidator:
             ],
         }
 
+        # mem-001 (reps=1) → batch_data, mem-002 (reps=5) → preserve,
+        # mem-003 (preserved=True) → skipped.  Only mem-001 in batch.
         calc = MagicMock(spec=AdaptiveDecayCalculator)
-        calc.calculate.side_effect = [0.01, 0.5]  # First deletable, second preservable
+        calc.calculate_batch.return_value = [0.01]  # mem-001 below threshold
 
         with patch(
             "backend.memory.permanent.consolidator.get_connection_count",

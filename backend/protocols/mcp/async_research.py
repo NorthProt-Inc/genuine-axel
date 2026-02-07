@@ -57,9 +57,9 @@ def get_active_research_tasks() -> list[dict]:
         {
             "task_id": tid,
             "done": task.done(),
-            "cancelled": task.cancelled()
+            "cancelled": task.cancelled(),
         }
-        for tid, task in _active_tasks.items()
+        for tid, task in list(_active_tasks.items())
     ]
 
 async def _analyze_findings(
@@ -78,16 +78,20 @@ async def _analyze_findings(
         Formatted analysis markdown
     """
     try:
-        from backend.core.utils.gemini_wrapper import get_gemini_wrapper
-
+        from backend.core.utils.gemini_client import gemini_generate
+        from google.genai import types
         from backend.config import DEFAULT_THINKING_LEVEL
 
-        wrapper = get_gemini_wrapper()
-        response = wrapper.generate_content_sync(
+        config = types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(
+                include_thoughts=True,
+                thinking_level=DEFAULT_THINKING_LEVEL,
+            ),
+        )
+        response = await gemini_generate(
             contents=f"{INTERN_ANALYSIS_PROMPT}\n\n{raw_report}",
-            stream=False,
-            enable_thinking=True,
-            thinking_level=DEFAULT_THINKING_LEVEL
+            config=config,
+            timeout_seconds=180.0,
         )
 
         analysis = response.text if hasattr(response, 'text') else str(response)
@@ -288,9 +292,7 @@ async def _run_research_pipeline(
         _append_to_research_log(query, source, None, execution_time, False)
 
     finally:
-
-        if task_id in _active_tasks:
-            del _active_tasks[task_id]
+        _active_tasks.pop(task_id, None)
 
 def dispatch_async_research(
     query: str,

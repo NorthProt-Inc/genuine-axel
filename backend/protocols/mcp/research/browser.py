@@ -17,10 +17,12 @@ from backend.protocols.mcp.research.config import (
 _log = get_logger("research.browser")
 
 
+from backend.core.utils.lazy import Lazy as _Lazy
+
+
 class BrowserManager:
     """Manages a single Playwright browser instance with auto-restart and idle cleanup."""
 
-    _instance: Optional["BrowserManager"] = None
     _lock: asyncio.Lock = asyncio.Lock()
 
     def __init__(self) -> None:
@@ -36,11 +38,7 @@ class BrowserManager:
     @classmethod
     async def get_instance(cls) -> "BrowserManager":
         """Return the singleton BrowserManager, creating if needed."""
-        if cls._instance is None:
-            async with cls._lock:
-                if cls._instance is None:
-                    cls._instance = cls()
-        return cls._instance
+        return _browser_instance.get()
 
     async def get_page(self):
         """Create and return a new browser page.
@@ -137,6 +135,9 @@ class BrowserManager:
             await self._cleanup()
 
 
+_browser_instance: _Lazy[BrowserManager] = _Lazy(BrowserManager)
+
+
 async def get_browser_manager() -> BrowserManager:
     """Return the singleton BrowserManager instance."""
-    return await BrowserManager.get_instance()
+    return _browser_instance.get()

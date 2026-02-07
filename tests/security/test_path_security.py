@@ -1,6 +1,5 @@
 """Tests for PathSecurityManager (TDD Red phase)."""
 
-import os
 from pathlib import Path
 
 import pytest
@@ -9,7 +8,6 @@ from backend.core.security.path_security import (
     PathAccessType,
     PathSecurityManager,
     PathValidationResult,
-    get_path_security,
 )
 
 # ---------------------------------------------------------------------------

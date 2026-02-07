@@ -58,7 +58,6 @@ class TestModuleImports:
             _tavily_search,
             _visit_page,
             _deep_dive,
-            search_duckduckgo,
             web_search,
         )
 

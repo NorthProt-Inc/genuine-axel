@@ -34,6 +34,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from backend.config import (
     PROJECT_ROOT as AXEL_ROOT,
+    SSE_CONNECTION_TIMEOUT,
+    TIMEOUT_MCP_TOOL,
     WORKING_MEMORY_PATH,
 )
 
@@ -50,7 +52,6 @@ from backend.core.mcp_tools import (
 
 # Import transport layer
 from backend.core.mcp_transport import (
-    SSE_CONNECTION_TIMEOUT,
     create_sse_app,
     run_stdio_server,
     get_connection_count,
@@ -137,14 +138,14 @@ async def call_tool(
             try:
                 result = await asyncio.wait_for(
                     handler(arguments),
-                    timeout=300.0  # 5 minute max for any tool
+                    timeout=float(TIMEOUT_MCP_TOOL),
                 )
                 _log.info("TOOL exec done", tool=name, result_cnt=len(result) if result else 0)
                 return result
 
             except asyncio.TimeoutError:
                 _log.error("TOOL timeout", tool=name)
-                return [TextContent(type="text", text=f"Error: Tool '{name}' timed out after 300 seconds")]
+                return [TextContent(type="text", text=f"Error: Tool '{name}' timed out after {TIMEOUT_MCP_TOOL} seconds")]
 
         _log.error("Tool not found in registry", tool=name, available=list_registered_tools()[:10])
         return [TextContent(type="text", text=f"Error: Unknown tool '{name}'.")]

@@ -81,15 +81,15 @@ from typing import Dict
 
 ENABLE_OS_LOCK = os.environ.get("ENABLE_OS_LOCK", "").lower() in ("true", "1", "yes", "on")
 
+from backend.core.utils.lazy import Lazy
+
 _async_locks: Dict[str, asyncio.Lock] = {}
-_locks_lock: asyncio.Lock = None
+_locks_lock: Lazy[asyncio.Lock] = Lazy(asyncio.Lock)
+
 
 def _get_locks_lock() -> asyncio.Lock:
-
-    global _locks_lock
-    if _locks_lock is None:
-        _locks_lock = asyncio.Lock()
-    return _locks_lock
+    """Get the singleton lock that guards _async_locks dict."""
+    return _locks_lock.get()
 
 def _acquire_os_lock(lock_path: str, timeout_seconds: float = 10.0) -> int:
 

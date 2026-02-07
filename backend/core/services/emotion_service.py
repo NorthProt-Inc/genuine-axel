@@ -1,13 +1,12 @@
 """Lightweight emotion classification using Gemini Flash."""
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 from google.genai import types
 
 from backend.core.logging import get_logger
-from backend.core.utils.gemini_wrapper import get_gemini_wrapper
+from backend.core.utils.gemini_client import get_gemini_client, get_model_name, gemini_generate
 
 _log = get_logger("services.emotion")
 
@@ -27,8 +26,6 @@ _CONFIG = types.GenerateContentConfig(
     max_output_tokens=4,
 )
 
-_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="emotion")
-
 
 def classify_emotion_sync(text: str) -> EmotionLabel:
     """Classify emotion synchronously. Returns 'neutral' on any failure.
@@ -43,23 +40,27 @@ def classify_emotion_sync(text: str) -> EmotionLabel:
         return "neutral"
 
     try:
-        wrapper = get_gemini_wrapper()
+        client = get_gemini_client()
         prompt = _CLASSIFY_PROMPT.format(text=text[:500])
-        response = wrapper.generate_content_sync(
+        response = client.models.generate_content(
+            model=get_model_name(),
             contents=prompt,
-            generation_config=_CONFIG,
-            timeout_seconds=20.0,
+            config=_CONFIG,
         )
-        label = response.text.strip().lower()
+        raw = response.text if response.text else ""
+        label = raw.strip().lower()
         if label in _VALID_LABELS:
             _log.debug("emotion_classified", label=label, text_len=len(text))
             return label
 
-        _log.warning("emotion_unexpected_label", raw=label)
+        if label:
+            _log.warning("emotion_unexpected_label", raw=label)
+        else:
+            _log.debug("emotion_empty_response", text_len=len(text))
         return "neutral"
 
     except Exception as e:
-        _log.warning("emotion_classify_failed", error=str(e)[:100])
+        _log.debug("emotion_classify_failed", error=str(e)[:100])
         return "neutral"
 
 
@@ -72,5 +73,27 @@ async def classify_emotion(text: str) -> EmotionLabel:
     Returns:
         One of: positive, negative, neutral, mixed
     """
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, classify_emotion_sync, text)
+    if not text or len(text.strip()) < 2:
+        return "neutral"
+
+    try:
+        response = await gemini_generate(
+            contents=_CLASSIFY_PROMPT.format(text=text[:500]),
+            config=_CONFIG,
+            timeout_seconds=20.0,
+        )
+        raw = response.text if response.text else ""
+        label = raw.strip().lower()
+        if label in _VALID_LABELS:
+            _log.debug("emotion_classified", label=label, text_len=len(text))
+            return label
+
+        if label:
+            _log.warning("emotion_unexpected_label", raw=label)
+        else:
+            _log.debug("emotion_empty_response", text_len=len(text))
+        return "neutral"
+
+    except Exception as e:
+        _log.debug("emotion_classify_failed", error=str(e)[:100])
+        return "neutral"

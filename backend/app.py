@@ -3,23 +3,25 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from typing import Optional
 import asyncio
 import os
 from uuid import uuid4
-from backend.core.utils.gemini_wrapper import GenerativeModelWrapper
+from backend.core.utils.gemini_client import get_gemini_client
 from backend.config import (
     HOST,
     PORT,
+    SHUTDOWN_HTTP_POOL_TIMEOUT,
+    SHUTDOWN_SESSION_TIMEOUT,
+    SHUTDOWN_TASK_TIMEOUT,
     get_cors_origins,
     APP_VERSION,
     PERSONA_PATH,
+    DEFAULT_GEMINI_MODEL,
     ensure_data_directories,
 )
 from backend.core import IdentityManager
 from backend.memory import MemoryManager
 from backend.llm import get_all_providers
-from backend.llm.router import get_model
 from backend.core.logging import get_logger, set_request_id, reset_request_id, get_request_id
 _log = get_logger("app")
 from backend.api import (
@@ -34,31 +36,27 @@ from backend.api import (
     audio_router,
 )
 
-_shutdown_event: Optional[asyncio.Event] = None
-_background_tasks: list = []
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    global _shutdown_event, _background_tasks, gemini_model, memory_manager, long_term_memory
-    _shutdown_event = asyncio.Event()
-    _background_tasks = []
     state = get_state()
-    state.background_tasks = _background_tasks
-    state.shutdown_event = _shutdown_event
+    state.shutdown_event = asyncio.Event()
+    state.background_tasks = []
 
     app.state.shutting_down = False
 
+    mm = None
+    ltm = None
     try:
-        model_config = get_model()
-        model_name = model_config.model
-        gemini_model = GenerativeModelWrapper(client_or_model=model_name)
-        memory_manager = MemoryManager(model=gemini_model)
-        long_term_memory = memory_manager.long_term
+        # Use Gemini for utility tasks (memory, graphrag, summarization)
+        # Chat model is now Anthropic, handled separately by llm.router
+        gem_client = get_gemini_client()
+        mm = MemoryManager(client=gem_client, model_name=DEFAULT_GEMINI_MODEL)
+        ltm = mm.long_term
+        state.gemini_client = gem_client
     except Exception as e:
         _log.warning("APP MemoryManager init failed", error=str(e))
-        memory_manager = None
-        long_term_memory = None
 
     from pathlib import Path
     from backend.core.utils.file_utils import startup_cleanup
@@ -67,18 +65,27 @@ async def lifespan(app: FastAPI):
 
     working_restored = False
     restored_turns = 0
-    if memory_manager and memory_manager.working.load_from_disk():
-        working_restored = True
-        restored_turns = memory_manager.working.get_turn_count()
-        _log.info(
-            "APP working memory restored",
-            turns=restored_turns,
-            session_id=memory_manager.working.session_id[:8]
-        )
+    if mm:
+        try:
+            loaded = await asyncio.wait_for(
+                asyncio.to_thread(mm.working.load_from_disk),
+                timeout=10.0,
+            )
+            if loaded:
+                working_restored = True
+                restored_turns = mm.working.get_turn_count()
+                _log.info(
+                    "APP working memory restored",
+                    turns=restored_turns,
+                    session_id=mm.working.session_id[:8]
+                )
+        except asyncio.TimeoutError:
+            _log.warning("APP working memory restore timed out")
+        except Exception as e:
+            _log.warning("APP working memory restore failed", error=str(e))
 
-    state.memory_manager = memory_manager
-    state.long_term_memory = long_term_memory
-    state.gemini_model = gemini_model
+    state.memory_manager = mm
+    state.long_term_memory = ltm
 
     available_llms = [p['name'] for p in get_all_providers() if p['available']]
     env = os.getenv("ENV", "dev")
@@ -88,13 +95,13 @@ async def lifespan(app: FastAPI):
         env=env,
         pid=os.getpid(),
         llm=available_llms[0] if available_llms else "none",
-        memory="on" if memory_manager else "off",
+        memory="on" if mm else "off",
     )
-    if memory_manager:
+    if mm:
         _log.info(
             "APP memory status",
-            working=f"{restored_turns if working_restored else 0}/{memory_manager.working.MAX_TURNS}",
-            longterm=long_term_memory.get_stats().get('total_memories', 0) if long_term_memory else 0,
+            working=f"{restored_turns if working_restored else 0}/{mm.working.MAX_TURNS}",
+            longterm=ltm.get_stats().get('total_memories', 0) if ltm else 0,
         )
     _log.info("APP ready", host=HOST, port=PORT)
 
@@ -103,50 +110,62 @@ async def lifespan(app: FastAPI):
     _log.info("APP shutdown", reason="lifespan_end")
 
     app.state.shutting_down = True
-    _shutdown_event.set()
+    state.shutdown_event.set()
 
-    active_streams = getattr(state, 'active_streams', [])
+    active_streams = state.active_streams
     if active_streams:
         _log.info("APP waiting for active streams", count=len(active_streams))
         await asyncio.sleep(min(10, len(active_streams) * 2))
 
-    task_list = state.background_tasks if getattr(state, "background_tasks", None) is not None else _background_tasks
-    for task in list(task_list):
+    for task in list(state.background_tasks):
         if not task.done():
             task.cancel()
             try:
-                await asyncio.wait_for(task, timeout=3.0)
+                await asyncio.wait_for(task, timeout=SHUTDOWN_TASK_TIMEOUT)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
-    _log.info("APP background tasks cleaned", count=len(task_list))
+    _log.info("APP background tasks cleaned", count=len(state.background_tasks))
 
-    if memory_manager:
+    if state.memory_manager:
 
-        if memory_manager.working.save_to_disk():
-            _log.info("APP working memory persisted", turns=memory_manager.working.get_turn_count())
+        if state.memory_manager.working.save_to_disk():
+            _log.info("APP working memory persisted", turns=state.memory_manager.working.get_turn_count())
 
         try:
             await asyncio.wait_for(
-                memory_manager.end_session(
+                state.memory_manager.end_session(
                     allow_llm_summary=False,
                     allow_fallback_summary=True
                 ),
-                timeout=3.0
+                timeout=SHUTDOWN_SESSION_TIMEOUT,
             )
         except Exception as e:
             _log.warning("APP session save failed", error=str(e))
 
-    if long_term_memory:
+    if state.long_term_memory:
         try:
-            flushed = long_term_memory.flush_access_updates()
+            flushed = state.long_term_memory.flush_access_updates()
             if flushed > 0:
                 _log.info("APP access updates flushed", count=flushed)
         except Exception as e:
             _log.warning("APP access update flush failed", error=str(e))
 
+    # TTS manager shutdown (skip if never initialized)
+    try:
+        from backend.media.tts_manager import _lazy_tts_manager
+
+        if _lazy_tts_manager._instance is not None:
+            await asyncio.wait_for(
+                _lazy_tts_manager._instance.shutdown(),
+                timeout=SHUTDOWN_TASK_TIMEOUT,
+            )
+            _log.info("APP TTS manager shut down")
+    except Exception as e:
+        _log.warning("APP TTS shutdown failed", error=str(e))
+
     try:
         from backend.core.utils.http_pool import close_all
-        await asyncio.wait_for(close_all(), timeout=2.0)
+        await asyncio.wait_for(close_all(), timeout=SHUTDOWN_HTTP_POOL_TIMEOUT)
     except Exception as e:
         _log.warning("APP HTTP pool close failed", error=str(e))
 
@@ -224,22 +243,13 @@ ensure_data_directories()
 
 identity_manager = IdentityManager(persona_path=str(PERSONA_PATH))
 
-gemini_model = None
-memory_manager = None
-long_term_memory = None
-
 _log.debug(
     "APP module loaded",
     version=APP_VERSION,
     available_llms=[p['name'] for p in get_all_providers() if p['available']]
 )
 
-init_state(
-    memory_manager=memory_manager,
-    long_term_memory=long_term_memory,
-    identity_manager=identity_manager,
-    gemini_model=gemini_model,
-)
+init_state(identity_manager=identity_manager)
 app.state.axnmihn_state = get_state()
 
 if __name__ == "__main__":

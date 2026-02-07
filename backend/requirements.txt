@@ -24,3 +24,4 @@ lxml>=5.0.0
 # Qwen3-TTS (local)
 qwen_tts @ file:///home/northprot/projects/axel-voice/Qwen3-TTS
 soundfile
+pyyaml

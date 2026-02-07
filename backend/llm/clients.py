@@ -5,8 +5,10 @@ from typing import AsyncGenerator, List, Dict, Any
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from dotenv import load_dotenv
+from backend.config import STREAM_MAX_RETRIES
 from backend.core.logging import get_logger
 from backend.core.logging.error_monitor import error_monitor
+from backend.core.utils.retry import RetryConfig, classify_error, retry_async_generator
 from backend.core.utils.timeouts import TIMEOUTS
 
 _log = get_logger("llm.clients")
@@ -115,7 +117,7 @@ def _calculate_dynamic_timeout(tool_count: int, is_first_chunk: bool = True, mod
 
 load_dotenv()
 
-from backend.config import MODEL_NAME
+from backend.config import MODEL_NAME, ANTHROPIC_CHAT_MODEL, ANTHROPIC_THINKING_BUDGET
 
 @dataclass
 class LLMProvider:
@@ -137,9 +139,17 @@ LLM_PROVIDERS: Dict[str, LLMProvider] = {
         icon="",
         supports_vision=True,
     ),
+    "anthropic": LLMProvider(
+        name="Claude Sonnet 4.5",
+        model=ANTHROPIC_CHAT_MODEL,
+        provider="anthropic",
+        api_key_env="ANTHROPIC_API_KEY",
+        icon="",
+        supports_vision=True,
+    ),
 }
 
-DEFAULT_PROVIDER = "google"
+DEFAULT_PROVIDER = "anthropic"
 
 def get_provider(name: str) -> LLMProvider:
 
@@ -187,6 +197,33 @@ class BaseLLMClient(ABC):
 
         pass
 
+def _gemini_schema_to_anthropic(schema: dict[str, Any]) -> dict[str, Any]:
+    """Convert Gemini UPPERCASED schema types to Anthropic lowercase.
+
+    Args:
+        schema: Gemini-format schema dict with UPPERCASE type values
+
+    Returns:
+        Schema dict with lowercase type values for Anthropic API
+    """
+    if not isinstance(schema, dict):
+        return schema
+    result = {}
+    for key, value in schema.items():
+        if key == "type" and isinstance(value, str):
+            result[key] = value.lower()
+        elif isinstance(value, dict):
+            result[key] = _gemini_schema_to_anthropic(value)
+        elif isinstance(value, list):
+            result[key] = [
+                _gemini_schema_to_anthropic(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            result[key] = value
+    return result
+
+
 class GeminiClient(BaseLLMClient):
 
     _circuit_breaker = CircuitBreakerState()
@@ -199,13 +236,46 @@ class GeminiClient(BaseLLMClient):
     def __init__(self, model: str = None):
         model = model or MODEL_NAME
         _log.debug("gemini client init start", model=model)
-        from backend.core.utils.gemini_wrapper import GenerativeModelWrapper
+        from backend.core.utils.gemini_client import get_gemini_client
         from google.genai import types
 
-        self.wrapper = GenerativeModelWrapper(model_name=model)
+        self._client = get_gemini_client()
         self.model_name = model
         self._types = types
         _log.info("gemini client ready", model=model)
+
+    @staticmethod
+    def _build_config(
+        temperature: float,
+        max_tokens: int,
+        enable_thinking: bool,
+        thinking_level: str | None,
+        tools: Any,
+        force_tool_call: bool,
+    ) -> "types.GenerateContentConfig":
+        """Build GenerateContentConfig from parameters."""
+        from google.genai import types
+
+        thinking_config = None
+        if enable_thinking:
+            kwargs: dict[str, Any] = {"include_thoughts": True}
+            if thinking_level:
+                kwargs["thinking_level"] = thinking_level
+            thinking_config = types.ThinkingConfig(**kwargs)
+
+        tool_config = None
+        if tools and force_tool_call:
+            tool_config = types.ToolConfig(
+                function_calling_config=types.FunctionCallingConfig(mode="ANY")
+            )
+
+        return types.GenerateContentConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+            thinking_config=thinking_config,
+            tools=tools,
+            tool_config=tool_config,
+        )
 
     async def generate_stream(
         self,
@@ -241,7 +311,6 @@ class GeminiClient(BaseLLMClient):
             for img_data in images:
                 try:
                     if isinstance(img_data, dict):
-
                         mime_type = img_data.get("mime_type", "image/png")
                         b64_data = img_data.get("data", "")
                         if b64_data:
@@ -252,7 +321,6 @@ class GeminiClient(BaseLLMClient):
                             ))
                             _log.debug("image added", mime=mime_type, size_bytes=len(image_bytes))
                     elif isinstance(img_data, bytes):
-
                         parts.append(self._types.Part.from_bytes(
                             data=img_data,
                             mime_type="image/png"
@@ -267,11 +335,6 @@ class GeminiClient(BaseLLMClient):
                     _log.error("image add failed", err=str(e))
 
         contents = [self._types.Content(role="user", parts=parts)]
-
-        generation_config = self._types.GenerateContentConfig(
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-        )
 
         gemini_tools = None
         if tools:
@@ -289,7 +352,14 @@ class GeminiClient(BaseLLMClient):
             except Exception as e:
                 _log.warning("tools setup failed", err=str(e))
 
-        MAX_STREAM_RETRIES = 5
+        config = self._build_config(
+            temperature, max_tokens, enable_thinking, thinking_level,
+            gemini_tools, force_tool_call,
+        )
+
+        GEMINI_STREAM_RETRY_CONFIG = RetryConfig(
+            max_retries=STREAM_MAX_RETRIES, base_delay=2.0, max_delay=60.0, jitter=0.3,
+        )
 
         if force_tool_call and gemini_tools:
             _log.info("force tool call enabled", tools=len(tools) if tools else 0)
@@ -299,154 +369,68 @@ class GeminiClient(BaseLLMClient):
                    model=self.model_name,
                    tools=len(tools) if tools else 0,
                    images=len(images) if images else 0,
-                   max_retries=MAX_STREAM_RETRIES)
+                   max_retries=GEMINI_STREAM_RETRY_CONFIG.max_retries)
 
-        def sync_stream_call():
+        async def _create_stream() -> AsyncGenerator[tuple, None]:
+            first_chunk_received = False
+            tool_count = len(gemini_tools[0].function_declarations) if gemini_tools else 0
 
-            _log.debug("sync stream call enter")
-            result = self.wrapper.generate_content_sync(
+            async for chunk in self._client.aio.models.generate_content_stream(
+                model=self.model_name,
                 contents=contents,
-                stream=True,
-                generation_config=generation_config,
-                enable_thinking=enable_thinking,
-                thinking_level=thinking_level,
-                tools=gemini_tools,
-                force_tool_call=force_tool_call
-            )
-            _log.debug("sync stream call done")
-            return result
+                config=config,
+            ):
+                is_thought = False
+                text_chunk = ""
+                function_calls: list[dict[str, Any]] = []
 
-        for retry_attempt in range(MAX_STREAM_RETRIES):
-            try:
-
-                if retry_attempt > 0:
-                    from backend.core.utils.gemini_wrapper import GenerativeModelWrapper
-                    self.wrapper = GenerativeModelWrapper(model_name=self.model_name)
-                    _log.info("wrapper recreated for retry", attempt=retry_attempt + 1)
-
-                _log.debug("api call start", timeout_s=API_CALL_TIMEOUT, attempt=retry_attempt + 1)
                 try:
-                    response_wrapper = await asyncio.wait_for(
-                        asyncio.to_thread(sync_stream_call),
-                        timeout=API_CALL_TIMEOUT
-                    )
-                    _log.debug("api call response received")
-                except asyncio.TimeoutError:
-                    _log.error("api call timeout", timeout_s=API_CALL_TIMEOUT)
-                    raise Exception(f"Gemini API timeout ({API_CALL_TIMEOUT}s) - server not responding")
-
-                queue = asyncio.Queue()
-                loop = asyncio.get_event_loop()
-
-                def run_sync_iteration():
-                    try:
-                        for chunk in response_wrapper:
-
-                             func_call = chunk.function_call if hasattr(chunk, 'function_call') else None
-                             loop.call_soon_threadsafe(queue.put_nowait, (chunk.text, chunk.is_thought, func_call))
-                        loop.call_soon_threadsafe(queue.put_nowait, None)
-                    except Exception as e:
-                        loop.call_soon_threadsafe(queue.put_nowait, e)
-
-                import threading
-                t = threading.Thread(target=run_sync_iteration)
-                t.start()
-
-                first_chunk_received = False
-
-                while True:
-
-                    tool_count = len(gemini_tools[0].function_declarations) if gemini_tools else 0
-                    dynamic_timeout = _calculate_dynamic_timeout(tool_count, is_first_chunk=not first_chunk_received, model=self.model_name)
-
-                    try:
-                        item = await asyncio.wait_for(queue.get(), timeout=dynamic_timeout)
-                    except asyncio.TimeoutError:
-                        _log.warning("stream chunk timeout",
-                                     timeout_s=dynamic_timeout,
-                                     tools=tool_count,
-                                     first_chunk=not first_chunk_received,
-                                     model=self.model_name)
-                        raise Exception(f"Stream timeout ({dynamic_timeout}s) - tools: {tool_count}")
-                    if item is None:
-                        break
-                    if isinstance(item, Exception):
-                        raise item
-
-                    if not first_chunk_received:
-                        first_chunk_received = True
-
-                    yield item
-
-                GeminiClient._circuit_breaker.record_success()
-
-                stream_elapsed = time.time() - stream_start_time
-                _adaptive_timeout.record_latency(stream_elapsed)
-
-                break
-
-            except Exception as e:
-                error_str = str(e).lower()
-                is_429 = '429' in error_str or 'resource_exhausted' in error_str
-                is_503 = '503' in error_str or 'unavailable' in error_str or 'overloaded' in error_str
-                is_timeout = 'timeout' in error_str
-                is_retryable = is_429 or is_503 or is_timeout
-
-                error_category = "rate_limit" if is_429 else ("server_error" if is_503 else ("timeout" if is_timeout else "unknown"))
-                attempt_elapsed = time.time() - stream_start_time
-
-                _log.warning("stream error",
-                             category=error_category,
-                             attempt=retry_attempt + 1,
-                             max_retries=MAX_STREAM_RETRIES,
-                             dur_ms=int(attempt_elapsed * 1000),
-                             retryable=is_retryable,
-                             err=str(e)[:150])
-
-                if is_503:
-                    GeminiClient._circuit_breaker.record_failure("server_error")
-                    error_monitor.record("503", str(e)[:200])
-                    _log.warning("circuit breaker failure (503)",
-                                 cooldown_s=GeminiClient._circuit_breaker._cooldown_seconds,
-                                 failures=GeminiClient._circuit_breaker._failure_count)
-
-                elif is_429:
-                    GeminiClient._circuit_breaker.record_failure("rate_limit")
-                    error_monitor.record("429", str(e)[:200])
-                    _log.warning("rate limit (429)",
-                                 failures=GeminiClient._circuit_breaker._failure_count)
-
-                elif is_timeout:
-                    GeminiClient._circuit_breaker.record_failure("timeout")
-                    error_monitor.record("timeout", str(e)[:200])
-                    _log.warning("timeout detected",
-                                 err=str(e)[:50],
-                                 failures=GeminiClient._circuit_breaker._failure_count)
-
-                if is_retryable and retry_attempt < MAX_STREAM_RETRIES - 1:
-                    if is_503:
-                        delay = (2 ** retry_attempt) * 3
-                    elif is_timeout:
-                        delay = (2 ** retry_attempt) * 2
-                    else:
-                        delay = 2 ** retry_attempt
-
-                    _log.warning("retry backoff",
-                                 err_type="503" if is_503 else ("timeout" if is_timeout else "429"),
-                                 next_attempt=retry_attempt + 2,
-                                 delay_s=delay,
-                                 remaining=MAX_STREAM_RETRIES - retry_attempt - 1)
-                    await asyncio.sleep(delay)
+                    if hasattr(chunk, "candidates") and chunk.candidates:
+                        candidate = chunk.candidates[0]
+                        if hasattr(candidate, "content") and candidate.content:
+                            parts_list = candidate.content.parts if hasattr(candidate.content, "parts") else []
+                            for part in parts_list:
+                                if hasattr(part, "thought") and part.thought:
+                                    is_thought = True
+                                if hasattr(part, "text") and part.text:
+                                    text_chunk += part.text
+                                if hasattr(part, "function_call") and part.function_call:
+                                    fc = part.function_call
+                                    if fc.name:
+                                        function_calls.append({
+                                            "name": fc.name,
+                                            "args": dict(fc.args) if fc.args else {},
+                                        })
+                    elif hasattr(chunk, "text") and chunk.text:
+                        text_chunk = chunk.text
+                except Exception as e:
+                    _log.warning("Chunk parsing error", error=str(e)[:100])
                     continue
 
-                total_elapsed = time.time() - stream_start_time
-                _log.error("gemini stream failed",
-                           err=str(e)[:300],
-                           err_type=type(e).__name__,
-                           category=error_category,
-                           dur_ms=int(total_elapsed * 1000),
-                           retry_exhausted=is_retryable)
-                raise
+                if not first_chunk_received:
+                    first_chunk_received = True
+
+                for fc in function_calls:
+                    yield ("", False, fc)
+
+                if text_chunk and not function_calls:
+                    yield (text_chunk, is_thought, None)
+
+        def _on_retry(attempt: int, error: Exception, delay: float) -> None:
+            error_type = classify_error(error)
+            GeminiClient._circuit_breaker.record_failure(error_type)
+            error_monitor.record(error_type, str(error)[:200])
+
+        async for item in retry_async_generator(
+            _create_stream,
+            config=GEMINI_STREAM_RETRY_CONFIG,
+            on_retry=_on_retry,
+        ):
+            yield item
+
+        GeminiClient._circuit_breaker.record_success()
+        stream_elapsed = time.time() - stream_start_time
+        _adaptive_timeout.record_latency(stream_elapsed)
 
     async def generate(
         self,
@@ -457,6 +441,7 @@ class GeminiClient(BaseLLMClient):
         images: List[Any] = None,
     ) -> str:
 
+        import base64
 
         text_content = prompt
         if system_prompt:
@@ -465,7 +450,6 @@ class GeminiClient(BaseLLMClient):
         parts = [self._types.Part.from_text(text=text_content)]
 
         if images:
-            import base64
             for img_data in images:
                 try:
                     if isinstance(img_data, dict):
@@ -484,25 +468,245 @@ class GeminiClient(BaseLLMClient):
 
         contents = [self._types.Content(role="user", parts=parts)]
 
-        generation_config = self._types.GenerateContentConfig(
+        config = self._types.GenerateContentConfig(
             temperature=temperature,
             max_output_tokens=max_tokens,
         )
 
-        result = self.wrapper.generate_content_sync(
+        response = await self._client.aio.models.generate_content(
+            model=self.model_name,
             contents=contents,
-            stream=False,
-            generation_config=generation_config
+            config=config,
         )
-        return result.text
+        return response.text if response.text else ""
 
-def get_llm_client(provider_name: str, model: str = None) -> BaseLLMClient:
+class AnthropicClient(BaseLLMClient):
+    """Anthropic Claude API client with native async support."""
 
+    _circuit_breaker = CircuitBreakerState()
+
+    @classmethod
+    def is_circuit_open(cls) -> bool:
+        return not cls._circuit_breaker.can_proceed()
+
+    def __init__(self, model: str | None = None):
+        model = model or ANTHROPIC_CHAT_MODEL
+        _log.debug("anthropic client init", model=model)
+        import anthropic
+        self._client = anthropic.AsyncAnthropic()
+        self._anthropic = anthropic
+        self.model_name = model
+        _log.info("anthropic client ready", model=model)
+
+    async def generate_stream(
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        images: List[Any] = None,
+        enable_thinking: bool = False,
+        thinking_level: str = "high",
+        tools: List[Dict] = None,
+        force_tool_call: bool = False,
+    ) -> AsyncGenerator[tuple, None]:
+        import json as json_mod
+
+        if AnthropicClient.is_circuit_open():
+            remaining = AnthropicClient._circuit_breaker.get_remaining_cooldown()
+            _log.warning("circuit breaker open (anthropic)", remaining_s=remaining)
+            raise Exception(f"Circuit breaker open ({remaining}s remaining). Anthropic API temporarily unavailable.")
+
+        # Build user content array
+        content: List[Dict[str, Any]] = []
+        if images:
+            for img_data in images:
+                if isinstance(img_data, dict):
+                    mime_type = img_data.get("mime_type", "image/png")
+                    b64_data = img_data.get("data", "")
+                    if b64_data:
+                        content.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": mime_type,
+                                "data": b64_data,
+                            },
+                        })
+        content.append({"type": "text", "text": prompt})
+
+        messages = [{"role": "user", "content": content}]
+
+        # Build API kwargs
+        kwargs: Dict[str, Any] = {
+            "model": self.model_name,
+            "max_tokens": max_tokens,
+            "messages": messages,
+        }
+
+        if system_prompt:
+            kwargs["system"] = [
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+
+        # Thinking configuration
+        if enable_thinking:
+            budget = ANTHROPIC_THINKING_BUDGET
+            kwargs["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": budget,
+            }
+            # Anthropic: temperature not allowed with thinking
+            # Ensure max_tokens covers both thinking + response
+            kwargs["max_tokens"] = max(max_tokens, budget + max_tokens)
+        else:
+            kwargs["temperature"] = temperature
+
+        # Tools (with cache_control on last item for prompt caching)
+        if tools:
+            tools_copy = [dict(t) for t in tools]
+            if tools_copy:
+                tools_copy[-1]["cache_control"] = {"type": "ephemeral"}
+            kwargs["tools"] = tools_copy
+            if force_tool_call and not enable_thinking:
+                kwargs["tool_choice"] = {"type": "any"}
+            else:
+                kwargs["tool_choice"] = {"type": "auto"}
+
+        stream_start_time = time.time()
+
+        _log.debug("anthropic stream start",
+                   model=self.model_name,
+                   tools=len(tools) if tools else 0,
+                   images=len(images) if images else 0,
+                   thinking=enable_thinking)
+
+        def _is_retryable_anthropic(error: Exception) -> bool:
+            if isinstance(error, self._anthropic.RateLimitError):
+                return True
+            if isinstance(error, self._anthropic.APIStatusError):
+                return getattr(error, "status_code", 0) == 529
+            if isinstance(error, (self._anthropic.APITimeoutError, self._anthropic.APIConnectionError)):
+                return True
+            return False
+
+        anthropic_retry_config = RetryConfig(
+            max_retries=STREAM_MAX_RETRIES, base_delay=2.0, max_delay=60.0, jitter=0.3,
+            retryable_check=_is_retryable_anthropic,
+        )
+
+        async def _create_stream() -> AsyncGenerator[tuple, None]:
+            current_tool_name: str | None = None
+            current_tool_json = ""
+
+            async with self._client.messages.stream(**kwargs) as stream:
+                async for event in stream:
+                    if event.type == "content_block_start":
+                        block = event.content_block
+                        if hasattr(block, "type") and block.type == "tool_use":
+                            current_tool_name = block.name
+                            current_tool_json = ""
+
+                    elif event.type == "content_block_delta":
+                        delta = event.delta
+                        if delta.type == "text_delta":
+                            yield (delta.text, False, None)
+                        elif delta.type == "thinking_delta":
+                            yield (delta.thinking, True, None)
+                        elif delta.type == "input_json_delta":
+                            current_tool_json += delta.partial_json
+
+                    elif event.type == "content_block_stop":
+                        if current_tool_name:
+                            try:
+                                args = json_mod.loads(current_tool_json) if current_tool_json else {}
+                            except json_mod.JSONDecodeError:
+                                _log.error("tool json parse failed, skipping tool call",
+                                           tool=current_tool_name,
+                                           json_preview=current_tool_json[:100])
+                                current_tool_name = None
+                                current_tool_json = ""
+                                continue
+                            yield ("", False, {"name": current_tool_name, "args": args})
+                            current_tool_name = None
+                            current_tool_json = ""
+
+        def _on_retry(attempt: int, error: Exception, delay: float) -> None:
+            error_type = classify_error(error)
+            AnthropicClient._circuit_breaker.record_failure(error_type)
+            error_monitor.record(error_type, str(error)[:200])
+
+        async for item in retry_async_generator(
+            _create_stream,
+            config=anthropic_retry_config,
+            on_retry=_on_retry,
+        ):
+            yield item
+
+        AnthropicClient._circuit_breaker.record_success()
+        stream_elapsed = time.time() - stream_start_time
+        _adaptive_timeout.record_latency(stream_elapsed)
+
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: str = "",
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        images: List[Any] = None,
+    ) -> str:
+        content: List[Dict[str, Any]] = []
+        if images:
+            for img_data in images:
+                if isinstance(img_data, dict):
+                    mime_type = img_data.get("mime_type", "image/png")
+                    b64_data = img_data.get("data", "")
+                    if b64_data:
+                        content.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": mime_type,
+                                "data": b64_data,
+                            },
+                        })
+        content.append({"type": "text", "text": prompt})
+
+        kwargs: Dict[str, Any] = {
+            "model": self.model_name,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": temperature,
+        }
+        if system_prompt:
+            kwargs["system"] = system_prompt
+
+        response = await self._client.messages.create(**kwargs)
+        return "".join(
+            block.text for block in response.content if block.type == "text"
+        )
+
+
+def get_llm_client(provider_name: str, model: str | None = None) -> BaseLLMClient:
+    """Get an LLM client for the given provider.
+
+    Args:
+        provider_name: Provider key (e.g. "google", "anthropic")
+        model: Optional model override
+
+    Returns:
+        BaseLLMClient instance
+    """
     provider = get_provider(provider_name)
     model_name = model or provider.model
 
     if provider.provider == "google":
         return GeminiClient(model=model_name)
-
+    elif provider.provider == "anthropic":
+        return AnthropicClient(model=model_name)
     else:
         raise ValueError(f"알 수 없는 프로바이더: {provider_name}")

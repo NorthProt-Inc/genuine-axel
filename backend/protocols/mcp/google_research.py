@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv(AXEL_ROOT / ".env")
 
 from backend.core.logging import get_logger
-from backend.core.utils.gemini_wrapper import get_gemini_wrapper
+from backend.core.utils.gemini_client import get_gemini_client
 from backend.core.utils.retry import retry_async, RetryConfig, DEFAULT_RETRY_CONFIG
 from backend.config import RESEARCH_POLL_INTERVAL, RESEARCH_MAX_POLL_TIME
 
@@ -46,8 +46,7 @@ async def google_deep_research(query: str, depth: int = 3) -> str:
         """단일 research 시도를 실행."""
         _log.info("REQ handling", tool="google_deep_research", query=query[:80])
 
-        wrapper = get_gemini_wrapper()
-        client = wrapper.client
+        client = get_gemini_client()
 
         interaction = client.interactions.create(
             input=query,

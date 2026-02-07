@@ -69,7 +69,7 @@ class AppState:
     identity_manager: Optional['IdentityManager'] = None
 
     # Additional services
-    gemini_model: Any = None
+    gemini_client: Any = None
     graph_rag: Optional['GraphRAG'] = None
     mcp_server: Any = None
 
@@ -85,6 +85,21 @@ class AppState:
     # Stream tracking
     active_streams: List = field(default_factory=list)
 
+    def reset(self) -> None:
+        """Reset all fields to their defaults (in-place, preserves identity)."""
+        self.memory_manager = None
+        self.long_term_memory = None
+        self.identity_manager = None
+        self.gemini_client = None
+        self.graph_rag = None
+        self.mcp_server = None
+        self.current_session_id = ""
+        self.last_activity = None
+        self.turn_count = 0
+        self.background_tasks = []
+        self.shutdown_event = None
+        self.active_streams = []
+
 state = AppState()
 
 def get_state() -> AppState:
@@ -99,7 +114,7 @@ def init_state(**kwargs):
     """Initialize application state with provided values.
 
     Args:
-        **kwargs: State attributes to set (e.g., memory_manager, gemini_model)
+        **kwargs: State attributes to set (e.g., memory_manager, gemini_client)
     """
     global state
     for key, value in kwargs.items():

@@ -96,20 +96,20 @@ class LongTermMemory:
         self._last_flush_time: float = time.time()
 
     def _init_embedding_service(self) -> None:
-        """Initialize embedding service with GenAI wrapper."""
+        """Initialize embedding service with genai.Client."""
         try:
-            from backend.core.utils.gemini_wrapper import GenerativeModelWrapper
+            from backend.core.utils.gemini_client import get_gemini_client
 
-            genai_wrapper = GenerativeModelWrapper(client_or_model=self.embedding_model)
+            client = get_gemini_client()
             self._embedding_service = EmbeddingService(
-                genai_wrapper=genai_wrapper,
+                client=client,
                 embedding_model=self.embedding_model,
             )
-            _log.debug("GenAI wrapper initialized for embeddings (with Fallback)")
+            _log.debug("GenAI client initialized for embeddings")
 
         except Exception as e:
-            _log.warning("GenAI wrapper init failed", error=str(e))
-            self._embedding_service = EmbeddingService(genai_wrapper=None)
+            _log.warning("GenAI client init failed", error=str(e))
+            self._embedding_service = EmbeddingService(client=None)
 
     # =========================================================================
     # Backward compatibility: collection property
@@ -123,9 +123,9 @@ class LongTermMemory:
         return self._repository.collection
 
     @property
-    def genai_wrapper(self):
-        """Get GenAI wrapper (for backward compatibility)."""
-        return self._embedding_service.genai_wrapper
+    def genai_client(self):
+        """Get GenAI client (for backward compatibility)."""
+        return self._embedding_service.client
 
     # =========================================================================
     # New public API (replacing direct collection access)
@@ -604,7 +604,7 @@ class LongTermMemory:
             relevance = f"{m['relevance']:.0%}"
 
             if "user_query" in metadata and "ai_response" in metadata:
-                content = f"User: {metadata['user_query']}\nAI: {metadata['ai_response']}"
+                content = f"Mark: {metadata['user_query']}\nAxel: {metadata['ai_response']}"
                 ts = metadata.get("timestamp", "")[:10]
                 lines.append(f"[기억/대화 {ts} | {relevance}]\n{content}")
             else:

@@ -13,14 +13,17 @@ from typing import TYPE_CHECKING, Optional, Dict, Any, List
 
 from backend.core.context_optimizer import ContextOptimizer, get_dynamic_system_prompt
 from backend.core.logging import get_logger, request_tracker as rt
+from backend.core.utils.text import truncate_text
 from backend.core.utils.timezone import VANCOUVER_TZ
 from backend.config import (
     MAX_CODE_CONTEXT_CHARS,
     MAX_CODE_FILE_CHARS,
     MEMORY_LONG_TERM_BUDGET,
+    MEMORY_SESSION_ARCHIVE_BUDGET,
     CONTEXT_WORKING_TURNS,
     CONTEXT_FULL_TURNS,
     CONTEXT_MAX_CHARS,
+    CONTEXT_IO_TIMEOUT,
 )
 
 if TYPE_CHECKING:
@@ -58,20 +61,14 @@ def _format_as_bullets(items: List[str], max_items: int = 10) -> str:
 
 
 def _truncate_text(text: str, max_chars: int, label: str = "") -> str:
-    """Truncate text to max_chars with suffix indicator."""
-    if not text:
-        return ""
-    if max_chars <= 0:
-        return ""
-    if len(text) <= max_chars:
-        return text
-    suffix = "\n... (truncated)"
-    keep = max_chars - len(suffix)
-    if keep <= 0:
-        return text[:max_chars]
-    if label:
+    """Truncate text to max_chars with suffix indicator.
+
+    Delegates to the shared truncate_text utility. Logs when truncation
+    occurs and a label is provided.
+    """
+    if label and text and len(text) > max_chars > 0:
         _log.debug("CTX truncate", section=label, chars=len(text), limit=max_chars)
-    return text[:keep].rstrip() + suffix
+    return truncate_text(text, max_chars)
 
 
 def _format_memory_age(timestamp_str: str, now: datetime = None) -> str:
@@ -214,19 +211,18 @@ class ContextService:
         else:
             _log.warning("MEM working unavailable")
 
-        # Session archive: NOT injected into context automatically.
-        # Available on-demand via MCP tool (get_recent_logs).
-        # Removes duplication with working_memory which already covers current session.
-
-        # Long-term + GraphRAG context (parallel fetch, sequential add)
-        longterm_data, graphrag_data = await asyncio.gather(
+        # Long-term + GraphRAG + Session archive context (parallel fetch)
+        longterm_data, graphrag_data, session_archive_data = await asyncio.gather(
             self._fetch_longterm_data(user_input, config),
             self._fetch_graphrag_data(user_input, config),
+            self._fetch_session_archive_data(user_input),
         )
         if longterm_data:
             optimizer.add_section("long_term", longterm_data)
         if graphrag_data:
             optimizer.add_section("graphrag", graphrag_data)
+        if session_archive_data:
+            optimizer.add_section("session_archive", session_archive_data)
 
         # Code context (optional)
         code_summary, code_files_content = await self._build_code_context(
@@ -289,6 +285,14 @@ class ContextService:
             return None
 
         try:
+            from backend.memory.temporal import parse_temporal_query
+
+            try:
+                temporal_filter = parse_temporal_query(user_input)
+            except Exception as e:
+                _log.debug("MEM temporal parse fail", error=str(e))
+                temporal_filter = None
+
             memgpt = getattr(self.memory_manager, 'memgpt', None) if self.memory_manager else None
             if memgpt:
                 token_budget = MEMORY_LONG_TERM_BUDGET
@@ -298,6 +302,7 @@ class ContextService:
                     memgpt.context_budget_select,
                     query=user_input,
                     token_budget=token_budget,
+                    temporal_filter=temporal_filter,
                 )
                 if not selected_memories:
                     return None
@@ -370,6 +375,83 @@ class ContextService:
                 return None
         except Exception as e:
             _log.warning("MEM graphrag fail", error=str(e))
+            return None
+
+    async def _fetch_session_archive_data(
+        self,
+        user_input: str,
+    ) -> Optional[str]:
+        """Fetch session archive data with temporal filter support.
+
+        Args:
+            user_input: User query, parsed for temporal patterns.
+
+        Returns:
+            Session archive context string, or None if unavailable.
+        """
+        if not self.memory_manager or not self.memory_manager.is_session_archive_available():
+            return None
+
+        try:
+            from backend.memory.temporal import parse_temporal_query
+
+            session_archive = self.memory_manager.session_archive
+
+            try:
+                temporal_filter = parse_temporal_query(user_input)
+            except Exception as e:
+                _log.debug("MEM session temporal parse fail", error=str(e))
+                temporal_filter = None
+
+            budget = MEMORY_SESSION_ARCHIVE_BUDGET
+
+            if temporal_filter:
+                filter_type = temporal_filter.get("type")
+                if filter_type == "exact":
+                    from_date = temporal_filter.get("date")
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            session_archive.get_sessions_by_date,
+                            from_date, None, 5, budget,
+                        ),
+                        timeout=CONTEXT_IO_TIMEOUT,
+                    )
+                elif filter_type == "range":
+                    from_date = temporal_filter.get("from")
+                    to_date = temporal_filter.get("to")
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            session_archive.get_sessions_by_date,
+                            from_date, to_date, 10, budget,
+                        ),
+                        timeout=CONTEXT_IO_TIMEOUT,
+                    )
+                else:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            session_archive.get_recent_summaries, 10, budget,
+                        ),
+                        timeout=CONTEXT_IO_TIMEOUT,
+                    )
+            else:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        session_archive.get_recent_summaries, 10, budget,
+                    ),
+                    timeout=CONTEXT_IO_TIMEOUT,
+                )
+
+            if not result or "최근 대화 기록이 없습니다" in result:
+                return None
+
+            _log.debug("MEM session_archive", chars=len(result))
+            return result
+
+        except asyncio.TimeoutError:
+            _log.warning("MEM session_archive timeout", timeout=CONTEXT_IO_TIMEOUT)
+            return None
+        except Exception as e:
+            _log.debug("MEM session_archive fail", error=str(e))
             return None
 
     async def _build_code_context(

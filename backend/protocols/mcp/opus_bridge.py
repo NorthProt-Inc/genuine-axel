@@ -1,9 +1,8 @@
 import asyncio
-import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Sequence
+from typing import Sequence
 
 _AXEL_ROOT_TEMP = Path(__file__).parent.parent.parent.parent.resolve()
 sys.path.insert(0, str(_AXEL_ROOT_TEMP))
@@ -12,259 +11,22 @@ from mcp.server import Server
 from mcp.types import Tool, TextContent
 import mcp.types as types
 
+from backend.core.filters import strip_xml_tags
 from backend.core.logging import get_logger
-from backend.core.tools.opus_types import OpusResult
-from backend.core.utils.opus_file_validator import (
-    AXEL_ROOT,
-    OPUS_MAX_FILES as MAX_FILES,
-    OPUS_MAX_TOTAL_CONTEXT as MAX_TOTAL_CONTEXT,
-    validate_opus_file_path as _validate_file_path,
-    read_opus_file_content as _read_file_content,
+from backend.core.utils.opus_shared import (
+    build_context_block,
+    run_claude_cli,
+    safe_decode,
+    DEFAULT_MODEL,
 )
-from backend.config import OPUS_DEFAULT_MODEL, OPUS_COMMAND_TIMEOUT
 
 logger = get_logger("opus-bridge")
 
-DEFAULT_MODEL = OPUS_DEFAULT_MODEL
-
-COMMAND_TIMEOUT = OPUS_COMMAND_TIMEOUT
-
-def _build_context_block(file_paths: List[str]) -> tuple[str, List[str], List[str]]:
-
-    if not file_paths:
-        return "", [], []
-
-    context_parts = []
-    included = []
-    errors = []
-    total_size = 0
-
-    for file_path in file_paths[:MAX_FILES]:
-        is_valid, resolved, error = _validate_file_path(file_path)
-
-        if not is_valid:
-            errors.append(error)
-            continue
-
-        content = _read_file_content(resolved)
-        content_size = len(content.encode('utf-8'))
-
-        if total_size + content_size > MAX_TOTAL_CONTEXT:
-            errors.append(f"Context limit reached, skipping: {file_path}")
-            continue
-
-        relative_path = str(resolved.relative_to(AXEL_ROOT))
-        context_parts.append(f"### File: {relative_path}\n```\n{content}\n```\n")
-        included.append(relative_path)
-        total_size += content_size
-
-    if len(file_paths) > MAX_FILES:
-        errors.append(f"Too many files ({len(file_paths)}), limited to {MAX_FILES}")
-
-    context_string = "\n".join(context_parts) if context_parts else ""
-    return context_string, included, errors
-
-def _safe_decode(data: bytes) -> str:
-
-    for encoding in ["utf-8", "cp949", "latin-1"]:
-        try:
-            return data.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return data.decode("utf-8", errors="replace")
-
-def _generate_task_summary(instruction: str, max_length: int = 60) -> str:
-
-    action_patterns = [
-        (r'\b(refactor|rewrite)\b', 'Refactoring'),
-        (r'\b(add|implement|create)\b', 'Implementing'),
-        (r'\b(fix|debug|resolve)\b', 'Fixing'),
-        (r'\b(update|modify|change)\b', 'Updating'),
-        (r'\b(review|analyze)\b', 'Analyzing'),
-        (r'\b(test|write test)\b', 'Writing tests for'),
-        (r'\b(document|docstring)\b', 'Documenting'),
-        (r'\b(optimize|improve)\b', 'Optimizing'),
-    ]
-
-    import re
-
-    instruction_lower = instruction.lower()
-    action_prefix = "Processing"
-
-    for pattern, action in action_patterns:
-        if re.search(pattern, instruction_lower):
-            action_prefix = action
-            break
-
-    file_match = re.search(r'([a-zA-Z_][a-zA-Z0-9_/]*\.py)', instruction)
-    func_match = re.search(r'(?:function|method|class)\s+[`"]?(\w+)[`"]?', instruction_lower)
-    module_match = re.search(r'(?:module|component|system)\s+[`"]?(\w+)[`"]?', instruction_lower)
-
-    subject = ""
-    if file_match:
-        subject = file_match.group(1)
-    elif func_match:
-        subject = f"`{func_match.group(1)}`"
-    elif module_match:
-        subject = f"{module_match.group(1)} module"
-    else:
-
-        first_line = instruction.split('\n')[0][:50].strip()
-        if len(first_line) > 40:
-            first_line = first_line[:37] + "..."
-        subject = first_line
-
-    summary = f"{action_prefix} {subject}"
-
-    if len(summary) > max_length:
-        summary = summary[:max_length-3] + "..."
-
-    return summary
-
-async def _run_claude_cli(
-    instruction: str,
-    context: str = "",
-    model: str = DEFAULT_MODEL,
-    timeout: int = COMMAND_TIMEOUT,
-    _is_fallback: bool = False
-) -> OpusResult:
-
-    import time
-    start_time = time.time()
-
-    if model not in ("opus", "sonnet"):
-        logger.warning(f"Model '{model}' not allowed, forcing opus")
-        model = "opus"
-
-    if context:
-        full_prompt = f"""## Context Files
-
-{context}
-
-## Task
-
-{instruction}"""
-    else:
-        full_prompt = instruction
-
-    CLAUDE_CLI = os.path.expanduser("~/.local/bin/claude")
-    command = [
-        CLAUDE_CLI,
-        "--print",
-        "--dangerously-skip-permissions",
-        "--model", model,
-        "-",
-    ]
-
-    task_summary = _generate_task_summary(instruction)
-
-    logger.info(
-        f"🐍 [Opus] Executing: {task_summary}",
-        model=model,
-        prompt_chars=len(full_prompt),
-        has_context=bool(context),
-    )
-
-    try:
-
-        env = {**os.environ, "TERM": "dumb"}
-
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(AXEL_ROOT),
-            env=env,
-        )
-
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(input=full_prompt.encode('utf-8')),
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-
-            process.kill()
-            await process.wait()
-            execution_time = time.time() - start_time
-            logger.error(f"[Opus] Task timed out after {timeout}s: {task_summary}")
-            return OpusResult(
-                success=False,
-                output="",
-                error=f"Command timed out after {timeout} seconds",
-                exit_code=-1,
-                execution_time=execution_time
-            )
-
-        stdout = _safe_decode(stdout_bytes)
-        stderr = _safe_decode(stderr_bytes)
-        returncode = process.returncode
-
-        execution_time = time.time() - start_time
-
-        if returncode == 0:
-            logger.info(
-                f"✅ [Opus] Complete: {task_summary}",
-                time=f"{execution_time:.1f}s",
-                output_chars=len(stdout),
-            )
-            return OpusResult(
-                success=True,
-                output=stdout,
-                exit_code=returncode,
-                execution_time=execution_time
-            )
-        else:
-            logger.warning(
-                f"❌ [Opus] Failed: {task_summary}",
-                exit_code=returncode,
-                stderr_preview=stderr[:200] if stderr else None,
-            )
-
-            if model == "opus" and not _is_fallback:
-                logger.info(f"🔄 [Opus] Retrying with sonnet: {task_summary}")
-                return await _run_claude_cli(
-                    instruction=instruction,
-                    context=context,
-                    model="sonnet",
-                    timeout=timeout,
-                    _is_fallback=True
-                )
-
-            return OpusResult(
-                success=False,
-                output=stdout,
-                error=stderr or f"Command exited with code {returncode}",
-                exit_code=returncode,
-                execution_time=execution_time
-            )
-
-    except FileNotFoundError:
-        logger.error("[Opus] CLI not found - ensure claude is installed")
-        return OpusResult(
-            success=False,
-            output="",
-            error="claude CLI not found. Install it with: npm install -g @anthropic-ai/claude-code",
-            exit_code=-1
-        )
-
-    except Exception as e:
-        execution_time = time.time() - start_time
-        logger.error(f"[Opus] Error: {e}", exc_info=True)
-        return OpusResult(
-            success=False,
-            output="",
-            error=str(e),
-            exit_code=-1,
-            execution_time=execution_time
-        )
-
 opus_server = Server("opus-bridge")
+
 
 @opus_server.list_tools()
 async def list_tools() -> list[Tool]:
-
     return [
         Tool(
             name="run_opus_task",
@@ -301,23 +63,23 @@ EXAMPLE:
                 "properties": {
                     "instruction": {
                         "type": "string",
-                        "description": "Clear, detailed instruction for the coding task"
+                        "description": "Clear, detailed instruction for the coding task",
                     },
                     "file_paths": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "List of file paths (relative to project root) to include as context",
-                        "default": []
+                        "default": [],
                     },
                     "model": {
                         "type": "string",
                         "enum": ["opus", "sonnet"],
                         "description": "Model to use (default: opus, fallback: sonnet)",
-                        "default": "opus"
-                    }
+                        "default": "opus",
+                    },
                 },
-                "required": ["instruction"]
-            }
+                "required": ["instruction"],
+            },
         ),
         Tool(
             name="opus_health_check",
@@ -328,13 +90,13 @@ Use this to verify the Opus bridge is properly configured.""",
             inputSchema={
                 "type": "object",
                 "properties": {},
-            }
+            },
         ),
     ]
 
+
 @opus_server.call_tool()
 async def call_tool(name: str, arguments: dict) -> Sequence[types.TextContent]:
-
     logger.info(f"Tool called: {name}", args=str(arguments)[:200])
 
     try:
@@ -346,12 +108,12 @@ async def call_tool(name: str, arguments: dict) -> Sequence[types.TextContent]:
             if not instruction:
                 return [TextContent(type="text", text="Error: instruction is required")]
 
-            context, included_files, context_errors = _build_context_block(file_paths)
+            context, included_files, context_errors = build_context_block(file_paths)
 
-            result = await _run_claude_cli(
+            result = await run_claude_cli(
                 instruction=instruction,
                 context=context,
-                model=model
+                model=model,
             )
 
             result.files_included = included_files
@@ -364,16 +126,17 @@ async def call_tool(name: str, arguments: dict) -> Sequence[types.TextContent]:
                 output_parts.append("")
 
             if result.success:
-                output_parts.append(result.output)
+                cleaned = strip_xml_tags(result.output)
+                output_parts.append(cleaned)
             else:
                 output_parts.append(f"Error: {result.error or 'Unknown error'}")
                 if result.output:
-                    output_parts.append(f"\nPartial output:\n{result.output}")
+                    cleaned = strip_xml_tags(result.output)
+                    output_parts.append(f"\nPartial output:\n{cleaned}")
 
             return [TextContent(type="text", text="\n".join(output_parts))]
 
         elif name == "opus_health_check":
-
             try:
                 result = await asyncio.to_thread(
                     subprocess.run,
@@ -383,29 +146,27 @@ async def call_tool(name: str, arguments: dict) -> Sequence[types.TextContent]:
                 )
 
                 if result.returncode == 0:
-                    version = _safe_decode(result.stdout).strip()
-                    return [TextContent(
-                        type="text",
-                        text=f"Healthy - Claude CLI {version}, model={DEFAULT_MODEL}"
-                    )]
+                    version = safe_decode(result.stdout).strip()
+                    return [
+                        TextContent(
+                            type="text",
+                            text=f"Healthy - Claude CLI {version}, model={DEFAULT_MODEL}",
+                        )
+                    ]
                 else:
-                    stderr = _safe_decode(result.stderr)
-                    return [TextContent(
-                        type="text",
-                        text=f"Error: {stderr}"
-                    )]
+                    stderr = safe_decode(result.stderr)
+                    return [TextContent(type="text", text=f"Error: {stderr}")]
 
             except FileNotFoundError:
-                return [TextContent(
-                    type="text",
-                    text="Not available - Claude CLI not installed"
-                )]
+                return [
+                    TextContent(
+                        type="text",
+                        text="Not available - Claude CLI not installed",
+                    )
+                ]
 
             except Exception as e:
-                return [TextContent(
-                    type="text",
-                    text=f"Error: {str(e)}"
-                )]
+                return [TextContent(type="text", text=f"Error: {str(e)}")]
 
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
@@ -414,8 +175,8 @@ async def call_tool(name: str, arguments: dict) -> Sequence[types.TextContent]:
         logger.error(f"Tool {name} failed: {e}", exc_info=True)
         return [TextContent(type="text", text=f"Tool execution failed: {str(e)}")]
 
-async def run_stdio():
 
+async def run_stdio():
     from mcp.server.stdio import stdio_server
 
     logger.info("Starting Opus Bridge in stdio mode")
@@ -424,11 +185,11 @@ async def run_stdio():
         await opus_server.run(
             read_stream,
             write_stream,
-            opus_server.create_initialization_options()
+            opus_server.create_initialization_options(),
         )
 
-async def run_sse(host: str = "0.0.0.0", port: int = 8766):
 
+async def run_sse(host: str = "0.0.0.0", port: int = 8766):
     from fastapi import FastAPI, Request
     from mcp.server.sse import SseServerTransport
     import uvicorn
@@ -438,13 +199,11 @@ async def run_sse(host: str = "0.0.0.0", port: int = 8766):
 
     @app.get("/sse")
     async def handle_sse(request: Request):
-        async with sse.connect_sse(
-            request.scope, request.receive, request._send
-        ) as streams:
+        async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
             await opus_server.run(
                 streams[0],
                 streams[1],
-                opus_server.create_initialization_options()
+                opus_server.create_initialization_options(),
             )
 
     @app.post("/messages/")
@@ -461,8 +220,8 @@ async def run_sse(host: str = "0.0.0.0", port: int = 8766):
     server = uvicorn.Server(config)
     await server.serve()
 
-def main():
 
+def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Opus Bridge MCP Server")
@@ -471,18 +230,18 @@ def main():
         nargs="?",
         default="stdio",
         choices=["stdio", "sse"],
-        help="Server mode (default: stdio)"
+        help="Server mode (default: stdio)",
     )
     parser.add_argument(
         "--host",
         default="0.0.0.0",
-        help="Host for SSE mode (default: 0.0.0.0)"
+        help="Host for SSE mode (default: 0.0.0.0)",
     )
     parser.add_argument(
         "--port",
         type=int,
         default=8766,
-        help="Port for SSE mode (default: 8766)"
+        help="Port for SSE mode (default: 8766)",
     )
 
     args = parser.parse_args()
@@ -494,6 +253,7 @@ def main():
             asyncio.run(run_sse(host=args.host, port=args.port))
     except KeyboardInterrupt:
         logger.info("Opus Bridge shutting down")
+
 
 if __name__ == "__main__":
     main()

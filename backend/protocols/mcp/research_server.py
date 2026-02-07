@@ -25,13 +25,10 @@ from backend.core.research_artifacts import read_artifact, list_artifacts
 
 from backend.protocols.mcp.research.browser import BrowserManager, get_browser_manager
 from backend.protocols.mcp.research.search_engines import (
-    get_tavily_client,
-    search_duckduckgo,
     web_search,
     tavily_search,
 )
 from backend.protocols.mcp.research.page_visitor import visit_page, deep_dive
-from backend.protocols.mcp.research.html_processor import clean_html, html_to_markdown
 
 # Backward-compatible aliases for callers using old names
 _google_search = web_search

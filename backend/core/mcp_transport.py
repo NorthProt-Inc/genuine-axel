@@ -22,11 +22,6 @@ if TYPE_CHECKING:
 
 _log = get_logger("core.mcp_transport")
 
-# SSE Configuration
-SSE_KEEPALIVE_INTERVAL = 15
-SSE_CONNECTION_TIMEOUT = 600
-SSE_RETRY_DELAY = 3000
-
 # Connection state
 active_connections: set = set()
 

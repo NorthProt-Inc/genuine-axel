@@ -71,7 +71,7 @@ class TaskTracker:
     Singleton task tracker for managing async operations.
 
     Usage:
-        tracker = TaskTracker.get()
+        tracker = get_task_tracker()
         task_id = tracker.create_task("google_research")
 
         tracker.start_task(task_id)
@@ -84,19 +84,10 @@ class TaskTracker:
         tracker.fail_task(task_id, "API error: rate limited")
     """
 
-    _instance: Optional["TaskTracker"] = None
-
     def __init__(self, max_tasks: int = 100):
         self._tasks: Dict[str, TaskInfo] = {}
         self._max_tasks = max_tasks
         self._lock = asyncio.Lock()
-
-    @classmethod
-    def get(cls, max_tasks: int = 100) -> "TaskTracker":
-        """Get singleton instance."""
-        if cls._instance is None:
-            cls._instance = cls(max_tasks)
-        return cls._instance
 
     async def create_task(
         self,
@@ -273,13 +264,11 @@ class TaskTracker:
             _log.debug("cleaned up tasks", count=to_remove)
 
 
-# Global instance
-_tracker: Optional[TaskTracker] = None
+from backend.core.utils.lazy import Lazy
+
+_tracker: Lazy[TaskTracker] = Lazy(TaskTracker)
 
 
 def get_task_tracker() -> TaskTracker:
     """Get the global task tracker instance."""
-    global _tracker
-    if _tracker is None:
-        _tracker = TaskTracker.get()
-    return _tracker
+    return _tracker.get()

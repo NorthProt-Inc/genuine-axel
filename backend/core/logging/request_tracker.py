@@ -133,19 +133,3 @@ def end_request():
     _logger.info("REQ summary", summary=summary)
 
     _current_request.set(None)
-
-class track_request:
-
-    def __init__(self, user_input: str):
-        self.user_input = user_input
-        self.tracker = None
-
-    def __enter__(self) -> RequestTracker:
-        self.tracker = start_request(self.user_input)
-        return self.tracker
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type:
-            _logger.error("REQ error", error=str(exc_val)[:100])
-        end_request()
-        return False

@@ -126,10 +126,11 @@ def main():
 
     print("\n[3/4] 인사이트 추출 (Gemini 3 Flash)...")
 
-    from backend.core.utils.gemini_wrapper import GenerativeModelWrapper
+    from backend.core.utils.gemini_client import get_gemini_client, get_model_name
     from backend.config import DEFAULT_GEMINI_MODEL
 
-    wrapper = GenerativeModelWrapper(client_or_model=DEFAULT_GEMINI_MODEL)
+    client = get_gemini_client()
+    model_name = get_model_name()
 
     all_insights = []
 
@@ -159,9 +160,9 @@ def main():
 """
         try:
 
-            result = wrapper.generate_content_sync(
+            result = client.models.generate_content(
+                model=model_name,
                 contents=prompt,
-                stream=False,
             )
             response_text = result.text if result.text else "{}"
 
@@ -219,6 +220,7 @@ def main():
 2. **최소 변경 원칙**: core_identity, voice_and_tone, relationship_notes, honesty_directive, user_preferences는 위에 제공된 기존 내용을 거의 그대로 복사하고, learned_behaviors만 새 인사이트로 업데이트.
 3. **창의적 유연성**: "반드시 ~한다" 같은 강박적 규칙 대신, **"~하는 경향이 있다", "~하는 편이다", "상황에 따라 ~한다"** 같은 표현을 사용하여 Axel이 창의적으로 변주할 여지를 남기세요.
 4. **관계 정의**: **'Mark와 Axel(형제/파트너)'** 관계로 정의하세요.
+5. **서식 규칙 보존**: voice_and_tone.nuance에 포매팅/가독성 관련 규칙이 있으면 유지하라. TTS 파이프라인이 마크다운을 자동 제거하므로, "문단을 나누지 않는다" 같은 TTS 관련 포매팅 제한은 추가하지 말 것.
 
 ## 출력 스키마 (JSON)
 {{
@@ -235,9 +237,9 @@ def main():
 
     try:
 
-        result = wrapper.generate_content_sync(
+        result = client.models.generate_content(
+            model=model_name,
             contents=synthesis_prompt,
-            stream=False,
         )
         response_text = result.text if result.text else "{}"
 

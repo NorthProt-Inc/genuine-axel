@@ -14,7 +14,26 @@ _log = get_logger("research.search_engines")
 # Tavily client singleton
 # ---------------------------------------------------------------------------
 TAVILY_API_KEY: str | None = os.getenv("TAVILY_API_KEY")
-_tavily_client = None
+
+
+def _create_tavily_client():
+    """Factory for Tavily client. Returns None if API key is missing."""
+    if not TAVILY_API_KEY:
+        return None
+    try:
+        from tavily import TavilyClient
+
+        client = TavilyClient(api_key=TAVILY_API_KEY)
+        _log.info("Tavily client initialized")
+        return client
+    except Exception as e:
+        _log.warning("Failed to init Tavily", error=str(e))
+        return None
+
+
+from backend.core.utils.lazy import Lazy
+
+_tavily_client: Lazy = Lazy(_create_tavily_client)
 
 
 def get_tavily_client():
@@ -23,16 +42,7 @@ def get_tavily_client():
     Returns:
         TavilyClient instance or None if API key is missing
     """
-    global _tavily_client
-    if _tavily_client is None and TAVILY_API_KEY:
-        try:
-            from tavily import TavilyClient
-
-            _tavily_client = TavilyClient(api_key=TAVILY_API_KEY)
-            _log.info("Tavily client initialized")
-        except Exception as e:
-            _log.warning("Failed to init Tavily", error=str(e))
-    return _tavily_client
+    return _tavily_client.get()
 
 
 # ---------------------------------------------------------------------------

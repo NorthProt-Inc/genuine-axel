@@ -7,6 +7,7 @@ from .clients import (
     get_llm_client,
     BaseLLMClient,
     GeminiClient,
+    AnthropicClient,
 )
 
 from .router import (
@@ -25,6 +26,7 @@ __all__ = [
     'get_llm_client',
     'BaseLLMClient',
     'GeminiClient',
+    'AnthropicClient',
     'ModelConfig',
     'DEFAULT_MODEL',
     'get_model',

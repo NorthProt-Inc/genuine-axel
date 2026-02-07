@@ -1,6 +1,5 @@
 """Tests for research config module."""
 
-import pytest
 
 
 def test_browser_max_uses_exists():

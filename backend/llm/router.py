@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import List
 from backend.core.logging import get_logger
-from backend.config import MODEL_NAME
+from backend.config import ANTHROPIC_CHAT_MODEL
 
 _log = get_logger("llm.router")
 
@@ -29,10 +29,10 @@ class ModelConfig:
         }
 
 DEFAULT_MODEL = ModelConfig(
-    id="gemini",
-    name="Gemini 3 Flash",
-    provider="google",
-    model=MODEL_NAME,
+    id="anthropic",
+    name="Claude Sonnet 4.5",
+    provider="anthropic",
+    model=ANTHROPIC_CHAT_MODEL,
 )
 
 def get_model() -> ModelConfig:

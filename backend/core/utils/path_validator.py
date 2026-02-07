@@ -31,7 +31,6 @@ READ_ONLY_EXCEPTIONS: List[str] = [
 
 def validate_path(
     path_str: str,
-    allow_outside_project: bool = False,
     operation: str = "read"
 ) -> Tuple[bool, Optional[str]]:
     """Validate a path via PathSecurityManager.

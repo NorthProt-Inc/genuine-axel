@@ -76,9 +76,9 @@ def mock_chromadb_client(mock_chromadb_collection):
 
 
 @pytest.fixture
-def mock_genai_wrapper():
-    """Mock GenerativeModelWrapper for embedding tests."""
-    wrapper = MagicMock()
+def mock_genai_client():
+    """Mock genai.Client for embedding tests."""
+    client = MagicMock()
 
     # Mock embedding result
     mock_embedding_result = MagicMock()
@@ -86,8 +86,8 @@ def mock_genai_wrapper():
     mock_embedding_value.values = [0.1] * 768  # 768-dim embedding
     mock_embedding_result.embeddings = [mock_embedding_value]
 
-    wrapper.embed_content_sync.return_value = mock_embedding_result
-    return wrapper
+    client.models.embed_content.return_value = mock_embedding_result
+    return client
 
 
 @pytest.fixture

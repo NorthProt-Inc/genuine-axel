@@ -1,7 +1,6 @@
 """Tests for page visitor functions."""
 
 import asyncio
-import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

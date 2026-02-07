@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, AsyncGenerator, Dict, Any, List, Optional
 
+from backend.config import REACT_DEFAULT_MAX_TOKENS, REACT_DEFAULT_TEMPERATURE, REACT_MAX_LOOPS
 from backend.core.filters import strip_xml_tags, has_partial_tool_tag
 from backend.core.logging import get_logger
 from backend.llm import get_llm_client
@@ -46,9 +47,9 @@ class ChatEvent:
 @dataclass
 class ReActConfig:
     """Configuration for ReAct loop."""
-    max_loops: int = 15
-    temperature: float = 0.7
-    max_tokens: int = 16384
+    max_loops: int = REACT_MAX_LOOPS
+    temperature: float = REACT_DEFAULT_TEMPERATURE
+    max_tokens: int = REACT_DEFAULT_MAX_TOKENS
     enable_thinking: bool = False
     thinking_level: str = "high"
 
@@ -216,9 +217,12 @@ class ReActLoopService:
                         background_tasks
                     )
 
-                # Build next prompt with tool results
+                # Build next prompt by accumulating tool results
                 if execution_result.observation:
-                    current_prompt += f"\n\n{execution_result.observation}\n\n위 결과를 바탕으로 사용자에게 자연스럽게 보고해."
+                    current_prompt += (
+                        f"\n\n[도구 실행 결과]:\n{execution_result.observation}\n\n"
+                        f"이전에 이미 전달한 내용은 반복하지 말고, 위 결과만 바탕으로 이어서 자연스럽게 보고해."
+                    )
                     force_tool_call = False
                     _log.debug("REACT loop", iteration=loop_count)
                 else:
@@ -234,7 +238,6 @@ class ReActLoopService:
                 current_system_prompt,
                 model_config,
                 config,
-                full_response
             ):
                 if event.type == EventType.TEXT:
                     full_response += event.content
@@ -261,7 +264,6 @@ class ReActLoopService:
         system_prompt: str,
         model_config: Any,
         config: ReActConfig,
-        current_response: str
     ) -> AsyncGenerator[ChatEvent, None]:
         """Generate final response when max loops reached."""
         _log.info("MAX_LOOPS reached, generating final response")

@@ -82,18 +82,20 @@ class TokenBucketRateLimiter:
         self._refill_tokens()
         return self._tokens
 
-_embedding_limiter: Optional[TokenBucketRateLimiter] = None
+from backend.core.utils.lazy import Lazy
+
+_embedding_limiter: Lazy[TokenBucketRateLimiter] = Lazy(
+    lambda: TokenBucketRateLimiter(
+        config=RateLimitConfig(
+            requests_per_minute=1000,
+            burst_size=50,
+            retry_after_seconds=0.5,
+        ),
+        name="embedding",
+    )
+)
+
 
 def get_embedding_limiter() -> TokenBucketRateLimiter:
-
-    global _embedding_limiter
-    if _embedding_limiter is None:
-        _embedding_limiter = TokenBucketRateLimiter(
-            config=RateLimitConfig(
-                requests_per_minute=1000,
-                burst_size=50,
-                retry_after_seconds=0.5,
-            ),
-            name="embedding"
-        )
-    return _embedding_limiter
+    """Get the singleton embedding rate limiter."""
+    return _embedding_limiter.get()

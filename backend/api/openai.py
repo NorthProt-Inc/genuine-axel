@@ -1,3 +1,4 @@
+import html
 import time
 import uuid
 import json
@@ -70,7 +71,7 @@ async def openai_chat_completions(request_body: OpenAIChatRequest):
     selected_model = request_body.model.lower() if request_body.model else "axel-auto"
     tier = MODEL_TIER_MAP.get(selected_model, "auto")
 
-    model_choice = "gemini"
+    model_choice = "anthropic"
 
     _logger.info(
         "OpenAI API req",
@@ -226,70 +227,69 @@ async def _stream_openai_response(handler: ChatHandler, request: HandlerRequest)
     state.active_streams.append(stream_id)
     _logger.debug("stream started", stream_id=stream_id, active_count=len(state.active_streams))
 
+    thinking_buffer: list[str] = []
+    thinking_start_time: float = 0.0
+    is_thinking = False
+    pending_tool_name: str | None = None
+
+    def _make_chunk(content: str, finish_reason: str | None = None) -> str:
+        data = {
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": "axnmihn",
+            "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": finish_reason}],
+        }
+        return f"data: {json.dumps(data)}\n\n"
+
+    def _flush_thinking() -> str:
+        duration = int(time.time() - thinking_start_time)
+        thinking_content = "".join(thinking_buffer)
+        details_block = (
+            f'<details type="reasoning" done="true" duration="{duration}">\n'
+            f"<summary>Thinking</summary>\n"
+            f"{html.escape(thinking_content)}\n"
+            f"</details>\n\n"
+        )
+        return _make_chunk(details_block)
+
     try:
         async for event in handler.process(request):
             if event.type == EventType.TEXT:
-                data = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": "axnmihn",
-                    "choices": [{"index": 0, "delta": {"content": event.content}, "finish_reason": None}]
-                }
-                yield f"data: {json.dumps(data)}\n\n"
+                if is_thinking and thinking_buffer:
+                    yield _flush_thinking()
+                    thinking_buffer.clear()
+                    is_thinking = False
+                yield _make_chunk(event.content)
 
             elif event.type == EventType.THINKING:
-
-                thinking_content = f"*{event.content}*"
-                data = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": "axnmihn",
-                    "choices": [{"index": 0, "delta": {"content": thinking_content}, "finish_reason": None}]
-                }
-                yield f"data: {json.dumps(data)}\n\n"
+                thinking_buffer.append(event.content)
 
             elif event.type == EventType.THINKING_START:
-
-                thinking_start_content = "\n\n*Thinking...*\n\n"
-                data = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": "axnmihn",
-                    "choices": [{"index": 0, "delta": {"content": thinking_start_content}, "finish_reason": None}]
-                }
-                yield f"data: {json.dumps(data)}\n\n"
+                is_thinking = True
+                thinking_start_time = time.time()
+                thinking_buffer.clear()
 
             elif event.type == EventType.THINKING_END:
-
-                pass
+                if thinking_buffer:
+                    yield _flush_thinking()
+                    thinking_buffer.clear()
+                is_thinking = False
 
             elif event.type == EventType.TOOL_START:
-
-                tool_name = event.metadata.get("tool_name", "unknown")
-                tool_start_content = f"\n\n*Tool: {tool_name}*\n\n"
-                data = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": "axnmihn",
-                    "choices": [{"index": 0, "delta": {"content": tool_start_content}, "finish_reason": None}]
-                }
-                yield f"data: {json.dumps(data)}\n\n"
+                pending_tool_name = event.metadata.get("tool_name", "unknown")
 
             elif event.type == EventType.TOOL_END:
-
-                tool_end_content = "\n\n*Done*\n\n"
-                data = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": "axnmihn",
-                    "choices": [{"index": 0, "delta": {"content": tool_end_content}, "finish_reason": None}]
-                }
-                yield f"data: {json.dumps(data)}\n\n"
+                tool_name = event.metadata.get("tool_name", pending_tool_name or "unknown")
+                success = event.metadata.get("success", True)
+                status = "Done" if success else "Failed"
+                details_block = (
+                    f'\n\n<details type="tool_calls" done="true" name="{html.escape(tool_name)}">\n'
+                    f"<summary>{status}</summary>\n"
+                    f"</details>\n\n"
+                )
+                yield _make_chunk(details_block)
+                pending_tool_name = None
 
             elif event.type == EventType.DONE:
 

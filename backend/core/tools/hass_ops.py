@@ -9,22 +9,20 @@ import httpx
 from backend.core.logging import get_logger
 from backend.core.utils.http_pool import get_client
 from backend.core.utils.circuit_breaker import HASS_CIRCUIT
+from backend.core.tools.hass_device_registry import load_device_config
 
 _log = get_logger("tools.hass")
 
-LIGHTS = [
-    "light.wiz_rgbw_tunable_77d6a0",
-    "light.wiz_rgbw_tunable_77d8f6",
-    "light.wiz_rgbw_tunable_77dc8c",
-    "light.wiz_rgbw_tunable_77de14",
-    "light.wiz_rgbw_tunable_77de40",
-    "light.wiz_rgbw_tunable_77e054",
-]
+# Load device config from YAML (single source of truth)
+# Lazy-loaded to avoid circular import (config → core → hass_ops → config)
+_device_config = None
 
-OTHER_DEVICES = {
-    "printer": "sensor.brother_mfc_j5855dw",
-    "air_purifier": "fan.vital_100s_series",
-}
+def _get_device_config():
+    global _device_config
+    if _device_config is None:
+        from backend.config import DATA_ROOT
+        _device_config = load_device_config(DATA_ROOT / "hass_devices.yaml")
+    return _device_config
 
 COLOR_MAP = {
 
@@ -38,6 +36,8 @@ COLOR_MAP = {
     "pink": [255, 192, 203],
     "cyan": [0, 255, 255],
     "warm": [255, 200, 150],
+    "warmwhite": [255, 200, 150],
+    "warm white": [255, 200, 150],
     "cool": [200, 220, 255],
 
     "빨강": [255, 0, 0],
@@ -51,46 +51,22 @@ COLOR_MAP = {
     "흰색": [255, 255, 255],
 }
 
-SENSOR_ALIASES = {
-    "iphone_battery": "sensor.iphone_battery_level",
-    "phone_battery": "sensor.iphone_battery_level",
-    "iphone_storage": "sensor.iphone_storage",
-    "printer_status": "sensor.mfc_j5855dw_status",
-    "printer_ink": "sensor.brother_mfc_j5855dw",
-    "ink_black": "sensor.mfc_j5855dw_black_ink_remaining",
-    "ink_cyan": "sensor.mfc_j5855dw_cyan_ink_remaining",
-    "ink_magenta": "sensor.mfc_j5855dw_magenta_ink_remaining",
-    "ink_yellow": "sensor.mfc_j5855dw_yellow_ink_remaining",
-    "printer_pages": "sensor.mfc_j5855dw_page_counter",
-    "weather": "weather.forecast_home",
-}
+def get_lights() -> list[str]:
+    return _get_device_config().lights
 
-SENSOR_GROUPS = {
-    "battery": ["sensor.iphone_battery_level"],
-    "printer_ink_all": [
-        "sensor.mfc_j5855dw_black_ink_remaining",
-        "sensor.mfc_j5855dw_cyan_ink_remaining",
-        "sensor.mfc_j5855dw_magenta_ink_remaining",
-        "sensor.mfc_j5855dw_yellow_ink_remaining"
-    ],
-    "printer": [
-        "sensor.mfc_j5855dw_status",
-        "sensor.mfc_j5855dw_black_ink_remaining",
-        "sensor.mfc_j5855dw_cyan_ink_remaining",
-        "sensor.mfc_j5855dw_magenta_ink_remaining",
-        "sensor.mfc_j5855dw_yellow_ink_remaining",
-        "sensor.mfc_j5855dw_page_counter"
-    ],
-}
+def get_other_devices() -> dict:
+    return _get_device_config().other_devices
+
+def get_sensor_aliases() -> dict:
+    return _get_device_config().sensor_aliases
+
+def get_sensor_groups() -> dict:
+    return _get_device_config().sensor_groups
 
 def _get_hass_config():
     """Lazy import to avoid circular dependency."""
     from backend.config import HASS_TIMEOUT, HASS_MAX_RETRIES
     return HASS_TIMEOUT, HASS_MAX_RETRIES
-
-# Defaults used at module load, but actual values fetched at runtime
-HASS_TIMEOUT = 10.0
-MAX_RETRIES = 2
 
 @dataclass
 class HASSResult:
@@ -362,10 +338,11 @@ async def hass_control_all_lights(
     color: Optional[Union[str, List[int]]] = None
 ) -> HASSResult:
 
-    _log.info("HASS all lights", action=action, cnt=len(LIGHTS))
+    lights = get_lights()
+    _log.info("HASS all lights", action=action, cnt=len(lights))
     results = []
 
-    for i, light_id in enumerate(LIGHTS):
+    for i, light_id in enumerate(lights):
         result = await hass_control_device(
             light_id,
             action,
@@ -374,11 +351,11 @@ async def hass_control_all_lights(
         )
         results.append(result)
 
-        if i < len(LIGHTS) - 1:
+        if i < len(lights) - 1:
             await asyncio.sleep(0.05)
 
     success_count = sum(1 for r in results if r.success)
-    total = len(LIGHTS)
+    total = len(lights)
 
     if success_count == total:
         _log.info("HASS all lights ok", action=action, cnt=success_count)
@@ -434,11 +411,14 @@ async def hass_read_sensor(query: str) -> HASSResult:
     _log.debug("HASS read sensor", query=query)
     query = query.lower().strip()
 
-    if query in SENSOR_GROUPS:
+    sensor_groups = get_sensor_groups()
+    sensor_aliases = get_sensor_aliases()
+
+    if query in sensor_groups:
         return await _read_sensor_group(query)
 
-    if query in SENSOR_ALIASES:
-        entity_id = SENSOR_ALIASES[query]
+    if query in sensor_aliases:
+        entity_id = sensor_aliases[query]
     elif query.startswith("sensor.") or query.startswith("binary_sensor."):
         entity_id = query
     else:
@@ -473,7 +453,7 @@ async def _read_single_sensor(entity_id: str) -> HASSResult:
 async def _read_sensor_group(group_name: str) -> HASSResult:
 
     _log.debug("HASS read group", group=group_name)
-    entity_ids = SENSOR_GROUPS.get(group_name, [])
+    entity_ids = get_sensor_groups().get(group_name, [])
 
     if not entity_ids:
         _log.warning("HASS fail", group=group_name, err="Unknown group")
@@ -511,44 +491,28 @@ async def _read_sensor_group(group_name: str) -> HASSResult:
         data={"group": group_name, "sensors": sensors}
     )
 
-def format_sensor_response(result: HASSResult) -> str:
+async def get_all_states(known_only: bool = False) -> HASSResult:
+    """Get states of Home Assistant entities.
 
-    if not result.success:
-        return f"센서 읽기 실패: {result.error or 'unknown'}"
-
-    return result.message
-
-async def list_available_devices() -> HASSResult:
-
-    _log.debug("HASS list devices")
-    return HASSResult(
-        success=True,
-        message="Available devices listed",
-        data={
-            "lights": LIGHTS,
-            "other_devices": OTHER_DEVICES,
-            "sensor_aliases": list(SENSOR_ALIASES.keys()),
-            "sensor_groups": list(SENSOR_GROUPS.keys())
-        }
-    )
-
-async def get_all_states() -> HASSResult:
-
-    _log.debug("HASS get all states")
+    Args:
+        known_only: If True, filter to registered entities only.
+            Defaults to False (return all entities).
+    """
+    _log.debug("HASS get all states", known_only=known_only)
     result = await _hass_api_call("GET", "/api/states")
 
     if result.success and result.data:
-
-        known_entities = set(LIGHTS) | set(OTHER_DEVICES.values()) | set(SENSOR_ALIASES.values())
-
-        filtered = [
-            state for state in result.data
-            if state.get("entity_id") in known_entities
-        ]
-
-        result.data = filtered
-        result.message = f"Retrieved {len(filtered)} known entity states"
-        _log.debug("HASS all states ok", cnt=len(filtered))
+        if known_only:
+            known_entities = _get_device_config().known_entities
+            filtered = [
+                state for state in result.data
+                if state.get("entity_id") in known_entities
+            ]
+            result.data = filtered
+            result.message = f"Retrieved {len(filtered)} known entity states"
+        else:
+            result.message = f"Retrieved {len(result.data)} entity states"
+        _log.debug("HASS all states ok", cnt=len(result.data))
 
     return result
 

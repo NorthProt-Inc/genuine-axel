@@ -28,6 +28,11 @@ MEMORY_TYPE_DECAY_MULTIPLIERS = {
     "conversation": 1.0,  # Regular conversation decays at base rate
 }
 
+# Recency paradox thresholds
+RECENCY_AGE_HOURS = 168  # 1 week — memory considered "old"
+RECENCY_ACCESS_HOURS = 24  # memory considered "recently accessed"
+RECENCY_BOOST = 1.3  # boost multiplier for old-but-recently-accessed
+
 
 def get_memory_age_hours(created_at: str) -> float:
     """Calculate memory age in hours.
@@ -148,10 +153,9 @@ class AdaptiveDecayCalculator:
             if last_accessed:
                 last_access_hours = get_memory_age_hours(last_accessed)
 
-                # If memory is old (>1 week) but accessed recently (<24h)
-                if hours_passed > 168 and last_access_hours < 24:
-                    recency_boost = 1.3
-                    decayed = decayed * recency_boost
+                # If memory is old but accessed recently
+                if hours_passed > RECENCY_AGE_HOURS and last_access_hours < RECENCY_ACCESS_HOURS:
+                    decayed = decayed * RECENCY_BOOST
                     _log.debug(
                         "Recency paradox boost applied",
                         memory_age_days=hours_passed / 24,

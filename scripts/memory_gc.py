@@ -509,11 +509,11 @@ async def main_async(dry_run: bool = False):
 
     memory_manager = None
     try:
-        from backend.core.utils.gemini_wrapper import GenerativeModelWrapper
-
+        from backend.core.utils.gemini_client import get_gemini_client
         from backend.config import DEFAULT_GEMINI_MODEL
-        gemini_model = GenerativeModelWrapper(client_or_model=DEFAULT_GEMINI_MODEL)
-        memory_manager = MemoryManager(model=gemini_model)
+
+        gemini_client = get_gemini_client()
+        memory_manager = MemoryManager(client=gemini_client, model_name=DEFAULT_GEMINI_MODEL)
     except Exception as e:
         print(f"Note: MemoryManager not available ({e})")
 

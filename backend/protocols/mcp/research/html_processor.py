@@ -60,7 +60,7 @@ def html_to_markdown(html: str, base_url: str = "") -> str:
     if not html:
         return ""
 
-    from markdownify import markdownify, MarkdownConverter
+    from markdownify import MarkdownConverter
 
     cleaned_html = clean_html(html)
 

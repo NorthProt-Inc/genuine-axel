@@ -12,11 +12,17 @@ from .memory_server import (
 )
 from .research.search_engines import (
     search_duckduckgo as search_duckduckgo,
-    tavily_search as _tavily_search,
-    web_search as _google_search,
+    tavily_search as tavily_search,
+    web_search as web_search,
 )
 from .research.page_visitor import (
-    visit_page as _visit_page,
-    deep_dive as _deep_dive,
+    visit_page as visit_page,
+    deep_dive as deep_dive,
 )
-from backend.core.tools.opus_executor import _generate_task_summary as _generate_task_summary
+
+# Backward-compatible aliases
+_tavily_search = tavily_search
+_google_search = web_search
+_visit_page = visit_page
+_deep_dive = deep_dive
+from backend.core.utils.opus_shared import generate_task_summary as generate_task_summary

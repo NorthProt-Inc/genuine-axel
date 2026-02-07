@@ -9,28 +9,16 @@ from backend.core.logging import get_logger
 
 _log = get_logger("protocols.memory")
 
-_memory_manager = None
-_long_term_memory = None
-_session_archive = None
-_graph_rag = None
-
 def _get_memory_components():
+    """Get memory components directly from AppState (no caching)."""
+    from backend.api.deps import get_state
 
-    global _memory_manager, _long_term_memory, _session_archive, _graph_rag
-
-    if _memory_manager is None:
-        try:
-            from backend.api.deps import get_state
-            state = get_state()
-            _memory_manager = state.memory_manager
-            _long_term_memory = state.long_term_memory
-            if _memory_manager:
-                _session_archive = _memory_manager.session_archive
-                _graph_rag = _memory_manager.graph_rag
-        except Exception as e:
-            _log.warning("Memory components not available", error=str(e))
-
-    return _memory_manager, _long_term_memory, _session_archive, _graph_rag
+    state = get_state()
+    mm = state.memory_manager
+    ltm = state.long_term_memory
+    sa = mm.session_archive if mm else None
+    gr = mm.graph_rag if mm else None
+    return mm, ltm, sa, gr
 
 async def store_memory(
     content: str,

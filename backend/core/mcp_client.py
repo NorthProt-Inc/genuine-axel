@@ -1,18 +1,26 @@
 import aiohttp
-import asyncio
 import os
 import time
 from typing import Any, Dict, List, Optional
 from backend.core.logging import get_logger
 from backend.config import MCP_MAX_TOOL_RETRIES, MCP_TOOL_RETRY_DELAY, MCP_MAX_TOOLS
+from backend.core.utils.retry import RetryConfig, retry_async
 
 _log = get_logger("core.mcp_client")
 
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8555")
 
-# Use config values
-MAX_TOOL_RETRIES = MCP_MAX_TOOL_RETRIES
-TOOL_RETRY_DELAY = MCP_TOOL_RETRY_DELAY
+MCP_RETRY_CONFIG = RetryConfig(
+    max_retries=MCP_MAX_TOOL_RETRIES,
+    base_delay=MCP_TOOL_RETRY_DELAY,
+    max_delay=30.0,
+    jitter=0.3,
+    retryable_patterns={
+        "connection", "timeout", "busy", "port",
+        "address already in use", "temporarily unavailable",
+        "resource exhausted",
+    },
+)
 
 CORE_TOOLS = [
 
@@ -40,80 +48,43 @@ class MCPClient:
         self.base_url = base_url or MCP_SERVER_URL
         self._gemini_tools_cache: Optional[List[dict]] = None
         self._cache_timestamp: float = 0
+        self._anthropic_tools_cache: Optional[List[dict]] = None
+        self._anthropic_cache_timestamp: float = 0
 
     async def call_tool(self, name: str, arguments: Dict[str, Any] = None) -> Dict[str, Any]:
-        """
-        Execute an MCP tool with retry logic and fallback mechanisms.
+        """Execute an MCP tool with retry logic and fallback mechanisms.
 
-        This method ensures tool calls are always executed reliably, even during
-        transient failures (e.g., port conflicts, temporary unavailability).
+        Uses retry_async for transient errors (connection, timeout, etc.).
+        ImportError -> HTTP fallback, ValueError -> immediate error return.
         """
         arguments = arguments or {}
-        last_error = None
 
-        for attempt in range(1, MAX_TOOL_RETRIES + 1):
-            try:
-                # Primary path: direct import call (fastest, no network overhead)
-                from backend.core.mcp_server import call_tool as mcp_call_tool
-                result = await mcp_call_tool(name, arguments)
+        async def _direct_call() -> Dict[str, Any]:
+            from backend.core.mcp_server import call_tool as mcp_call_tool
+            result = await mcp_call_tool(name, arguments)
+            texts = [r.text for r in result if hasattr(r, "text")]
+            return {"success": True, "result": "\n".join(texts)}
 
-                texts = []
-                for r in result:
-                    if hasattr(r, 'text'):
-                        texts.append(r.text)
+        try:
+            return await retry_async(_direct_call, config=MCP_RETRY_CONFIG)
 
-                _log.debug("TOOL exec success", tool=name, attempt=attempt)
-                return {"success": True, "result": "\n".join(texts)}
+        except ImportError as e:
+            _log.warning("MCP import failed, trying HTTP", tool=name, error=str(e))
+            return await self.call_tool_http(name, arguments)
 
-            except ImportError as e:
-                # MCP server module not available, try HTTP fallback
-                _log.warning("MCP import failed, trying HTTP", tool=name, error=str(e))
-                return await self.call_tool_http(name, arguments)
+        except ValueError as e:
+            _log.error("Tool not found", tool=name, error=str(e))
+            return {"success": False, "error": f"Tool '{name}' not found: {str(e)}"}
 
-            except ValueError as e:
-                # Tool not found - don't retry, it won't suddenly appear
-                _log.error("Tool not found", tool=name, error=str(e))
-                return {"success": False, "error": f"Tool '{name}' not found: {str(e)}"}
-
-            except Exception as e:
-                last_error = e
-                error_str = str(e).lower()
-
-                # Check if error is retryable
-                is_retryable = any(x in error_str for x in [
-                    'connection', 'timeout', 'busy', 'port', 'address already in use',
-                    'temporarily unavailable', 'resource exhausted'
-                ])
-
-                if is_retryable and attempt < MAX_TOOL_RETRIES:
-                    delay = TOOL_RETRY_DELAY * (2 ** (attempt - 1))
-                    _log.warning("Tool call failed, retrying",
-                                tool=name,
-                                attempt=attempt,
-                                delay_s=delay,
-                                error=str(e)[:100])
-                    await asyncio.sleep(delay)
-                    continue
-
-                # Non-retryable error or retries exhausted
-                _log.error("MCP tool call failed",
-                          tool=name,
-                          attempt=attempt,
-                          error=str(e)[:200])
-                break
-
-        # All retries failed, try HTTP as last resort
-        _log.warning("Direct call exhausted, trying HTTP fallback", tool=name)
-        http_result = await self.call_tool_http(name, arguments)
-
-        if http_result.get("success"):
-            return http_result
-
-        # Both methods failed
-        return {
-            "success": False,
-            "error": f"Tool call failed after {MAX_TOOL_RETRIES} retries: {str(last_error)}"
-        }
+        except Exception as e:
+            _log.warning("Direct call exhausted, trying HTTP fallback", tool=name)
+            http_result = await self.call_tool_http(name, arguments)
+            if http_result.get("success"):
+                return http_result
+            return {
+                "success": False,
+                "error": f"Tool call failed after {MCP_RETRY_CONFIG.max_retries} retries: {str(e)}",
+            }
 
     async def call_tool_http(self, name: str, arguments: Dict[str, Any] = None) -> Dict[str, Any]:
         """Execute an MCP tool via HTTP fallback.
@@ -211,16 +182,15 @@ class MCPClient:
         core_tools = [t for t in tools if t["name"] in CORE_TOOLS]
         other_tools = [t for t in tools if t["name"] not in CORE_TOOLS]
         prioritized_tools = core_tools + other_tools
-        limited_tools = prioritized_tools[:max_tools]
 
         _log.info("Tool prioritization",
                     total=len(tools),
                     core=len(core_tools),
-                    limited=len(limited_tools))
+                    limited=min(max_tools, len(prioritized_tools)))
 
         gemini_functions = []
 
-        for tool in limited_tools:
+        for tool in prioritized_tools:
             schema = tool.get("input_schema", {})
             properties = schema.get("properties", {})
             required = schema.get("required", [])
@@ -250,17 +220,62 @@ class MCPClient:
         self._cache_timestamp = now
         _log.info("Gemini tools cache updated", tool_count=len(gemini_functions))
 
-        return gemini_functions
+        return gemini_functions[:max_tools]
 
-_client: Optional[MCPClient] = None
+    async def get_anthropic_tools(self, force_refresh: bool = False, max_tools: int | None = None) -> list:
+        """Get MCP tools formatted for Anthropic Claude API.
+
+        Uses input_schema directly from MCP tool definitions.
+        Prioritizes core tools over others when limiting count.
+
+        Args:
+            force_refresh: Bypass cache and refresh tools
+            max_tools: Maximum number of tools to return
+
+        Returns:
+            List of Anthropic-formatted tool definitions
+        """
+        max_tools = max_tools or MAX_TOOLS
+
+        now = time.time()
+        if (not force_refresh
+            and self._anthropic_tools_cache is not None
+            and (now - self._anthropic_cache_timestamp) < self.TOOLS_CACHE_TTL):
+            _log.debug("Using cached anthropic tools", age_seconds=int(now - self._anthropic_cache_timestamp))
+            return self._anthropic_tools_cache[:max_tools]
+
+        _log.info("Refreshing anthropic tools cache", max_tools=max_tools)
+        tools = await self.get_tools_with_schemas()
+
+        core_tools = [t for t in tools if t["name"] in CORE_TOOLS]
+        other_tools = [t for t in tools if t["name"] not in CORE_TOOLS]
+        prioritized_tools = core_tools + other_tools
+
+        _log.info("Anthropic tool prioritization",
+                   total=len(tools),
+                   core=len(core_tools),
+                   limited=min(max_tools, len(prioritized_tools)))
+
+        anthropic_tools = [
+            {
+                "name": tool["name"],
+                "description": tool["description"],
+                "input_schema": tool.get("input_schema", {"type": "object", "properties": {}}),
+            }
+            for tool in prioritized_tools
+        ]
+
+        self._anthropic_tools_cache = anthropic_tools
+        self._anthropic_cache_timestamp = now
+        _log.info("Anthropic tools cache updated", tool_count=len(anthropic_tools))
+
+        return anthropic_tools[:max_tools]
+
+from backend.core.utils.lazy import Lazy
+
+_client: Lazy[MCPClient] = Lazy(MCPClient)
+
 
 def get_mcp_client() -> MCPClient:
-    """Get or create the singleton MCP client instance.
-
-    Returns:
-        Shared MCPClient instance
-    """
-    global _client
-    if _client is None:
-        _client = MCPClient()
-    return _client
+    """Get the singleton MCP client instance."""
+    return _client.get()

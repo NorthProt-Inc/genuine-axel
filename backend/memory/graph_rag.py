@@ -9,6 +9,22 @@ from backend.core.utils.timezone import now_vancouver
 
 _log = get_logger("memory.graph")
 
+
+@dataclass(frozen=True)
+class GraphRAGConfig:
+    """Centralized configuration for GraphRAG query parameters."""
+
+    max_entities: int = 5
+    max_depth: int = 2
+    max_relations: int = 10
+    max_paths: int = 5
+    importance_threshold: float = 0.6
+    weight_increment: float = 0.1
+    max_query_entities: int = 3
+    max_format_entities: int = 5
+    max_format_relations: int = 5
+
+
 # Try to import native module for optimized graph operations
 try:
     import axnmihn_native as _native
@@ -330,9 +346,25 @@ class KnowledgeGraph:
 
 class GraphRAG:
 
-    def __init__(self, model=None, graph: KnowledgeGraph = None):
-        self.model = model
+    def __init__(
+        self,
+        client=None,
+        model_name: str | None = None,
+        graph: KnowledgeGraph = None,
+        config: GraphRAGConfig = None,
+        # Backward compat: accept model= kwarg
+        model=None,
+    ):
+        if client is None and model is not None:
+            # Legacy: extract .client from GenerativeModelWrapper
+            client = getattr(model, "client", model)
+        self.client = client
+        self.model_name = model_name
+        if not self.model_name:
+            from backend.core.utils.gemini_client import get_model_name
+            self.model_name = get_model_name()
         self.graph = graph or KnowledgeGraph()
+        self.config = config or GraphRAGConfig()
 
     EXTRACTION_TIMEOUT_SECONDS = MEMORY_EXTRACTION_TIMEOUT
 
@@ -340,7 +372,7 @@ class GraphRAG:
         self,
         text: str,
         source: str = "conversation",
-        importance_threshold: float = 0.6,
+        importance_threshold: float | None = None,
         timeout_seconds: float = None
     ) -> Dict[str, Any]:
         """Extract entities and relations from text using LLM.
@@ -354,9 +386,11 @@ class GraphRAG:
         Returns:
             Dict with added entity/relation counts
         """
-        if not self.model:
-            return {"error": "Model not available", "entities_added": 0, "relations_added": 0}
+        if not self.client:
+            return {"error": "Client not available", "entities_added": 0, "relations_added": 0}
 
+        if importance_threshold is None:
+            importance_threshold = self.config.importance_threshold
         timeout = timeout_seconds or self.EXTRACTION_TIMEOUT_SECONDS
 
         prompt = f"""당신은 Axel, Mark(종민)의 AI 시스템 관리자입니다.
@@ -390,15 +424,16 @@ JSON 응답만 (설명 없이):
 """
 
         try:
-
-            response = await asyncio.to_thread(
-                self.model.generate_content_sync,
-                contents=prompt,
-                stream=False,
-                timeout_seconds=timeout
+            response = await asyncio.wait_for(
+                self.client.aio.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                ),
+                timeout=timeout,
             )
 
-            response_text = response.text.replace("```json", "").replace("```", "").strip()
+            raw_text = response.text if response.text else ""
+            response_text = raw_text.replace("```json", "").replace("```", "").strip()
             data = json.loads(response_text)
 
             added_entities = []
@@ -464,8 +499,8 @@ JSON 응답만 (설명 없이):
     async def query(
         self,
         query: str,
-        max_entities: int = 5,
-        max_depth: int = 2
+        max_entities: int | None = None,
+        max_depth: int | None = None,
     ) -> GraphQueryResult:
         """Query graph for relevant entities and relations.
 
@@ -477,7 +512,13 @@ JSON 응답만 (설명 없이):
         Returns:
             GraphQueryResult with entities, relations, and context
         """
-        if not self.model:
+        cfg = self.config
+        if max_entities is None:
+            max_entities = cfg.max_entities
+        if max_depth is None:
+            max_depth = cfg.max_depth
+
+        if not self.client:
             return GraphQueryResult(
                 entities=[],
                 relations=[],
@@ -506,7 +547,7 @@ JSON 응답만 (설명 없이):
             )
 
         related_entity_ids = set()
-        for entity_id in query_entities[:3]:
+        for entity_id in query_entities[:cfg.max_query_entities]:
             neighbors = self.graph.get_neighbors(entity_id, depth=max_depth)
             related_entity_ids.update(neighbors)
             related_entity_ids.add(entity_id)
@@ -526,8 +567,8 @@ JSON 응답만 (설명 없이):
 
         paths = []
         entity_ids = [e.id for e in entities]
-        for i, eid1 in enumerate(entity_ids[:3]):
-            for eid2 in entity_ids[i+1:4]:
+        for i, eid1 in enumerate(entity_ids[:cfg.max_query_entities]):
+            for eid2 in entity_ids[i+1:cfg.max_query_entities + 1]:
                 path = self.graph.find_path(eid1, eid2)
                 if path and len(path) > 1:
                     paths.append(path)
@@ -538,8 +579,8 @@ JSON 응답만 (설명 없이):
 
         return GraphQueryResult(
             entities=entities,
-            relations=relations[:10],
-            paths=paths[:5],
+            relations=relations[:cfg.max_relations],
+            paths=paths[:cfg.max_paths],
             context=context,
             relevance_score=relevance_score
         )
@@ -555,14 +596,16 @@ JSON 배열로 응답 (엔티티 이름만):
 """
 
         try:
-
-            response = await asyncio.to_thread(
-                self.model.generate_content_sync,
-                contents=prompt,
-                stream=False
+            response = await asyncio.wait_for(
+                self.client.aio.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                ),
+                timeout=30.0,
             )
 
-            text = response.text.replace("```json", "").replace("```", "").strip()
+            raw = response.text if response.text else "[]"
+            text = raw.replace("```json", "").replace("```", "").strip()
             entity_names = json.loads(text)
 
             entity_ids = []
@@ -586,15 +629,16 @@ JSON 배열로 응답 (엔티티 이름만):
         """Format graph data as human-readable context string."""
         parts = []
 
+        cfg = self.config
         if entities:
             parts.append("###  관련 엔티티:")
-            for e in entities[:5]:
+            for e in entities[:cfg.max_format_entities]:
                 props = ", ".join(f"{k}={v}" for k, v in e.properties.items()) if e.properties else ""
                 parts.append(f"- **{e.name}** ({e.entity_type}){': ' + props if props else ''}")
 
         if relations:
             parts.append("\n###  관계:")
-            for r in relations[:5]:
+            for r in relations[:cfg.max_format_relations]:
                 source = self.graph.get_entity(r.source_id)
                 target = self.graph.get_entity(r.target_id)
                 if source and target:

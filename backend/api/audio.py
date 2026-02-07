@@ -1,60 +1,33 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File, Form
 from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional
-import re
-import subprocess
-import tempfile
-import os
+import asyncio
 from backend.core.logging import get_logger
 from backend.config import MAX_AUDIO_BYTES
 from backend.api.deps import require_api_key
 from backend.api.utils import read_upload_file
+from backend.media.tts_utils import clean_text_for_tts, convert_wav_to_mp3
 
 _logger = get_logger("api.audio")
 
 
-def clean_text_for_tts(text: str) -> str:
-    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
-    text = re.sub(r'\*(.+?)\*', r'\1', text)
-    text = re.sub(r'`(.+?)`', r'\1', text)
-    text = re.sub(r'#{1,6}\s*', '', text)
-    text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
-    text = re.sub(r'```[\s\S]*?```', '', text)
-    text = re.sub(r'[^\w\s가-힣ㄱ-ㅎㅏ-ㅣ,.!?;:\'\"()~\-]', '', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+from backend.core.utils.lazy import Lazy
 
 
-def convert_wav_to_mp3(wav_bytes: bytes) -> bytes:
-    """Convert WAV audio to MP3 using ffmpeg.
+def _create_tts() -> "Qwen3TTS":
+    """Create Qwen3TTS instance."""
+    from backend.media.qwen_tts import Qwen3TTS
 
-    Args:
-        wav_bytes: Raw WAV audio data
+    return Qwen3TTS()
 
-    Returns:
-        MP3 encoded audio bytes
-    """
-    wav_path = tempfile.mktemp(suffix=".wav")
-    mp3_path = wav_path.replace(".wav", ".mp3")
 
-    try:
-        with open(wav_path, "wb") as f:
-            f.write(wav_bytes)
+_lazy_tts: Lazy = Lazy(_create_tts)
 
-        subprocess.run([
-            "ffmpeg", "-y", "-i", wav_path,
-            "-codec:a", "libmp3lame", "-qscale:a", "2",
-            mp3_path
-        ], check=True, capture_output=True)
 
-        with open(mp3_path, "rb") as f:
-            return f.read()
-    finally:
-        if os.path.exists(wav_path):
-            os.unlink(wav_path)
-        if os.path.exists(mp3_path):
-            os.unlink(mp3_path)
+def _get_tts() -> "Qwen3TTS":
+    """Return a module-level Qwen3TTS singleton (thread-safe lazy init)."""
+    return _lazy_tts.get()
 
 
 router = APIRouter(tags=["Audio"], dependencies=[Depends(require_api_key)])
@@ -65,28 +38,57 @@ class SpeechRequest(BaseModel):
     input: str
     voice: str = "axel"  # 무시됨, 호환성용
     response_format: Optional[str] = "mp3"  # Open WebUI 호환
+    message_id: Optional[str] = None  # ICL chain용 — 동일 message 내 문장 간 톤 일관성
 
 
 @router.post("/v1/audio/speech", summary="Generate speech (Qwen3-TTS)")
-async def create_speech(request: SpeechRequest):
-    if not request.input or not request.input.strip():
-        raise HTTPException(status_code=400, detail="Input text is required")
+async def create_speech(request: SpeechRequest, raw_request: Request):
+    # TTS disabled — use OpenAI TTS directly from Open WebUI
+    raise HTTPException(status_code=501, detail="TTS disabled on backend")
 
-    _logger.info("TTS request", chars=len(request.input))
+    # --- original implementation (re-enable when ready) ---
+    # if not request.input or not request.input.strip():
+    #     raise HTTPException(status_code=400, detail="Input text is required")
+    #
+    # _logger.info("TTS request", chars=len(request.input))
+    #
+    # from backend.media.qwen_tts import QueueFullError
+    # from backend.config import TTS_SERVICE_URL
+    #
+    # # Phase 3: proxy mode when TTS_SERVICE_URL is set
+    # if TTS_SERVICE_URL:
+    #     return await _proxy_to_tts_service(request, raw_request)
+    #
+    # return await _synthesize_in_process(request, raw_request)
+
+
+async def _synthesize_in_process(request: SpeechRequest, raw_request: Request) -> Response:
+    """Synthesize TTS in-process with queue/timeout/disconnect protection."""
+    from backend.media.qwen_tts import QueueFullError
 
     try:
+        # Check if client already disconnected
+        if await raw_request.is_disconnected():
+            _logger.info("TTS client disconnected before synthesis")
+            raise HTTPException(status_code=499, detail="Client disconnected")
+
         cleaned_text = clean_text_for_tts(request.input)
 
-        from backend.media.qwen_tts import Qwen3TTS
-        tts = Qwen3TTS()
-        audio_bytes, sr = await tts.synthesize(cleaned_text)
+        loop = asyncio.get_event_loop()
+        tts = await loop.run_in_executor(None, _get_tts)
+        audio_bytes, sr = await tts.synthesize(cleaned_text, message_id=request.message_id)
 
         if not audio_bytes:
             raise HTTPException(status_code=500, detail="TTS synthesis failed")
 
+        # Check disconnect again before expensive mp3 conversion
+        if await raw_request.is_disconnected():
+            _logger.info("TTS client disconnected after synthesis")
+            raise HTTPException(status_code=499, detail="Client disconnected")
+
         # mp3 변환
         if request.response_format == "mp3":
-            audio_bytes = convert_wav_to_mp3(audio_bytes)
+            audio_bytes = await convert_wav_to_mp3(audio_bytes)
             media_type = "audio/mpeg"
             filename = "speech.mp3"
         else:
@@ -96,12 +98,60 @@ async def create_speech(request: SpeechRequest):
         return Response(
             content=audio_bytes,
             media_type=media_type,
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
 
+    except QueueFullError:
+        raise HTTPException(status_code=429, detail="TTS queue full, try again later")
+    except asyncio.TimeoutError:
+        _logger.warning("TTS synthesis timeout")
+        raise HTTPException(status_code=504, detail="TTS synthesis timed out")
+    except HTTPException:
+        raise
     except Exception as e:
         _logger.error("TTS error", error=str(e))
         raise HTTPException(status_code=500, detail=f"TTS error: {str(e)}")
+
+
+async def _proxy_to_tts_service(request: SpeechRequest, raw_request: Request) -> Response:
+    """Forward TTS request to the external TTS microservice."""
+    from backend.config import TTS_SERVICE_URL, TTS_SYNTHESIS_TIMEOUT
+    from backend.core.utils.http_pool import get_client
+
+    try:
+        if await raw_request.is_disconnected():
+            raise HTTPException(status_code=499, detail="Client disconnected")
+
+        client = await get_client(
+            "tts",
+            base_url=TTS_SERVICE_URL,
+            timeout=TTS_SYNTHESIS_TIMEOUT + 5.0,
+        )
+
+        resp = await client.post(
+            "/v1/audio/speech",
+            json={
+                "input": request.input,
+                "voice": request.voice,
+                "response_format": request.response_format,
+                "message_id": request.message_id,
+            },
+        )
+
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+        return Response(
+            content=resp.content,
+            media_type=resp.headers.get("content-type", "audio/mpeg"),
+            headers={"Content-Disposition": resp.headers.get("content-disposition", "")},
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        _logger.error("TTS proxy error", error=str(e))
+        raise HTTPException(status_code=502, detail=f"TTS service error: {str(e)}")
 
 
 @router.get("/v1/audio/voices")

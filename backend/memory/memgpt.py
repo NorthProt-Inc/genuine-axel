@@ -48,9 +48,23 @@ class SemanticKnowledge:
 
 class MemGPTManager:
 
-    def __init__(self, long_term_memory, model=None, config: MemGPTConfig = None):
+    def __init__(
+        self,
+        long_term_memory,
+        client=None,
+        model_name: str | None = None,
+        config: MemGPTConfig = None,
+        # Backward compat: accept model= kwarg
+        model=None,
+    ):
         self.long_term = long_term_memory
-        self.model = model
+        if client is None and model is not None:
+            client = getattr(model, "client", model)
+        self.client = client
+        self.model_name = model_name
+        if not self.model_name:
+            from backend.core.utils.gemini_client import get_model_name
+            self.model_name = get_model_name()
         self.config = config or DEFAULT_CONFIG
 
     def context_budget_select(
@@ -254,8 +268,8 @@ class MemGPTManager:
         min_age = min_age_days or self.config.semantic_threshold_days
         min_reps = min_repetitions or self.config.min_episodic_repetitions
 
-        if not self.model:
-            return {"error": "Model not available for semantic transformation"}
+        if not self.client:
+            return {"error": "Client not available for semantic transformation"}
 
         from .permanent import get_memory_age_hours
 
@@ -372,12 +386,13 @@ class MemGPTManager:
 """
 
         try:
-            response = self.model.generate_content_sync(
+            response = self.client.models.generate_content(
+                model=self.model_name,
                 contents=prompt,
-                stream=False
             )
 
-            text = response.text.replace("```json", "").replace("```", "").strip()
+            raw = response.text if response.text else "{}"
+            text = raw.replace("```json", "").replace("```", "").strip()
             data = json.loads(text)
 
             return SemanticKnowledge(

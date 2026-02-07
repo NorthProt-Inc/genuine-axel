@@ -37,7 +37,7 @@ MCP 도구 `mcp__axel-mcp__hass_control_light` 사용:
 
 ### fan on/off
 MCP 도구 `mcp__axel-mcp__hass_control_device` 사용:
-- entity_id: "fan.vital_100s_series"
+- entity_id: air purifier entity (from hass_list_entities)
 - action: "turn_on" 또는 "turn_off"
 
 ### status

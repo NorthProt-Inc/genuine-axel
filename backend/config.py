@@ -6,6 +6,7 @@ _logger = get_logger("config")
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 APP_VERSION = os.getenv("AXNMIHN_VERSION", "1.0")
 
@@ -18,6 +19,10 @@ CHAT_THINKING_LEVEL = "high"
 
 MODEL_NAME = CHAT_MODEL
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-001")
+
+# Anthropic Chat Model (primary chat provider)
+ANTHROPIC_CHAT_MODEL = os.getenv("ANTHROPIC_CHAT_MODEL", "claude-sonnet-4-5-20250929")
+ANTHROPIC_THINKING_BUDGET = int(os.getenv("ANTHROPIC_THINKING_BUDGET", "10000"))
 
 SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "tavily")
 
@@ -153,13 +158,17 @@ def _get_int_env(name: str, default: int) -> int:
 #   graphrag: entity/relation context, usually compact
 BUDGET_SYSTEM_PROMPT = _get_int_env("BUDGET_SYSTEM_PROMPT", 20_000)
 BUDGET_TEMPORAL = _get_int_env("BUDGET_TEMPORAL", 5_000)
-BUDGET_WORKING_MEMORY = _get_int_env("BUDGET_WORKING_MEMORY", 150_000)
-BUDGET_LONG_TERM = _get_int_env("BUDGET_LONG_TERM", 50_000)
-BUDGET_GRAPHRAG = _get_int_env("BUDGET_GRAPHRAG", 20_000)
+BUDGET_WORKING_MEMORY = _get_int_env("BUDGET_WORKING_MEMORY", 80_000)
+BUDGET_LONG_TERM = _get_int_env("BUDGET_LONG_TERM", 30_000)
+BUDGET_GRAPHRAG = _get_int_env("BUDGET_GRAPHRAG", 12_000)
+BUDGET_SESSION_ARCHIVE = _get_int_env("BUDGET_SESSION_ARCHIVE", 8_000)
 
 # Legacy token-based aliases (chars / 4) used by memgpt budget_select
+# Also includes session archive alias
 MEMORY_LONG_TERM_BUDGET = BUDGET_LONG_TERM // 4
 MEMORY_TIME_CONTEXT_BUDGET = BUDGET_TEMPORAL // 4
+MEMORY_SESSION_ARCHIVE_BUDGET = BUDGET_SESSION_ARCHIVE // 4
+CONTEXT_IO_TIMEOUT: float = float(os.getenv("CONTEXT_IO_TIMEOUT", "10.0"))
 
 MAX_CONTEXT_TOKENS = (
     BUDGET_WORKING_MEMORY +
@@ -180,8 +189,8 @@ MAX_CODE_CONTEXT_CHARS = _get_int_env("MAX_CODE_CONTEXT_CHARS", 300_000)
 MAX_CODE_FILE_CHARS = _get_int_env("MAX_CODE_FILE_CHARS", 300_000)
 
 # Context building configuration
-CONTEXT_WORKING_TURNS = _get_int_env("CONTEXT_WORKING_TURNS", 30)
-CONTEXT_FULL_TURNS = _get_int_env("CONTEXT_FULL_TURNS", 10)
+CONTEXT_WORKING_TURNS = _get_int_env("CONTEXT_WORKING_TURNS", 20)
+CONTEXT_FULL_TURNS = _get_int_env("CONTEXT_FULL_TURNS", 6)
 CONTEXT_MAX_CHARS = _get_int_env("CONTEXT_MAX_CHARS", 500_000)
 
 def _get_float_env(name: str, default: float) -> float:
@@ -260,3 +269,59 @@ CONTEXT_SQL_PERSIST_TURNS = _get_int_env("CONTEXT_SQL_PERSIST_TURNS", 10)
 # Memory Extraction
 # =============================================================================
 MEMORY_EXTRACTION_TIMEOUT = _get_int_env("MEMORY_EXTRACTION_TIMEOUT", 120)
+
+# =============================================================================
+# Timeouts (canonical source — replaces timeouts.py hardcoded values)
+# =============================================================================
+TIMEOUT_API_CALL = _get_int_env("TIMEOUT_API_CALL", 180)
+TIMEOUT_STREAM_CHUNK = _get_int_env("TIMEOUT_STREAM_CHUNK", 60)
+TIMEOUT_FIRST_CHUNK_BASE = _get_int_env("TIMEOUT_FIRST_CHUNK_BASE", 100)
+TIMEOUT_MCP_TOOL = _get_int_env("TIMEOUT_MCP_TOOL", 300)
+TIMEOUT_DEEP_RESEARCH = _get_int_env("TIMEOUT_DEEP_RESEARCH", 600)
+TIMEOUT_HTTP_DEFAULT = _get_float_env("TIMEOUT_HTTP_DEFAULT", 30.0)
+TIMEOUT_HTTP_CONNECT = _get_float_env("TIMEOUT_HTTP_CONNECT", 5.0)
+
+# =============================================================================
+# SSE Configuration
+# =============================================================================
+SSE_KEEPALIVE_INTERVAL = _get_int_env("SSE_KEEPALIVE_INTERVAL", 15)
+SSE_CONNECTION_TIMEOUT = _get_int_env("SSE_CONNECTION_TIMEOUT", 600)
+SSE_RETRY_DELAY = _get_int_env("SSE_RETRY_DELAY", 3000)
+
+# =============================================================================
+# Retry Configuration
+# =============================================================================
+GEMINI_MAX_RETRIES = _get_int_env("GEMINI_MAX_RETRIES", 5)
+GEMINI_RETRY_DELAY_BASE = _get_float_env("GEMINI_RETRY_DELAY_BASE", 2.0)
+STREAM_MAX_RETRIES = _get_int_env("STREAM_MAX_RETRIES", 5)
+EMBEDDING_MAX_RETRIES = _get_int_env("EMBEDDING_MAX_RETRIES", 3)
+
+# =============================================================================
+# File / Search Limits
+# =============================================================================
+MAX_FILE_SIZE = _get_size_bytes("MAX_FILE_SIZE", "MAX_FILE_SIZE_MB", 10)
+MAX_LOG_LINES = _get_int_env("MAX_LOG_LINES", 1000)
+MAX_SEARCH_RESULTS = _get_int_env("MAX_SEARCH_RESULTS", 100)
+
+# =============================================================================
+# ReAct Loop Defaults
+# =============================================================================
+REACT_MAX_LOOPS = _get_int_env("REACT_MAX_LOOPS", 15)
+REACT_DEFAULT_TEMPERATURE = _get_float_env("REACT_DEFAULT_TEMPERATURE", 0.7)
+REACT_DEFAULT_MAX_TOKENS = _get_int_env("REACT_DEFAULT_MAX_TOKENS", 16384)
+
+# =============================================================================
+# Shutdown Timeouts
+# =============================================================================
+SHUTDOWN_TASK_TIMEOUT = _get_float_env("SHUTDOWN_TASK_TIMEOUT", 3.0)
+SHUTDOWN_SESSION_TIMEOUT = _get_float_env("SHUTDOWN_SESSION_TIMEOUT", 3.0)
+SHUTDOWN_HTTP_POOL_TIMEOUT = _get_float_env("SHUTDOWN_HTTP_POOL_TIMEOUT", 2.0)
+
+# =============================================================================
+# TTS Configuration
+# =============================================================================
+TTS_SYNTHESIS_TIMEOUT = _get_float_env("TTS_SYNTHESIS_TIMEOUT", 30.0)
+TTS_FFMPEG_TIMEOUT = _get_float_env("TTS_FFMPEG_TIMEOUT", 10.0)
+TTS_QUEUE_MAX_PENDING = _get_int_env("TTS_QUEUE_MAX_PENDING", 3)
+TTS_IDLE_TIMEOUT = _get_int_env("TTS_IDLE_TIMEOUT", 300)
+TTS_SERVICE_URL = os.getenv("TTS_SERVICE_URL", "")

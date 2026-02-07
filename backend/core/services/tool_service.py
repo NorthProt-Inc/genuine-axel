@@ -56,14 +56,12 @@ class ToolExecutionService:
     async def execute_tools(
         self,
         function_calls: List[Dict[str, Any]],
-        event_callback: Optional[Any] = None
     ) -> ToolExecutionResult:
         """
         Execute a list of tool calls.
 
         Args:
             function_calls: List of function call dicts with name and args
-            event_callback: Optional async callback for tool events
 
         Returns:
             ToolExecutionResult with results and deferred tools

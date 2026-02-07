@@ -1,5 +1,5 @@
 import asyncio
-from typing import Callable, Any, Optional
+from typing import Callable, Any
 from backend.core.logging import get_logger
 
 _logger = get_logger("async_utils")
@@ -8,15 +8,18 @@ class ConcurrencyLimitError(Exception):
 
     pass
 
-_thread_semaphore: Optional[asyncio.Semaphore] = None
+from backend.core.utils.lazy import Lazy
+
 _MAX_CONCURRENT_THREADS = 8
 
-def _get_semaphore() -> asyncio.Semaphore:
+_thread_semaphore: Lazy[asyncio.Semaphore] = Lazy(
+    lambda: asyncio.Semaphore(_MAX_CONCURRENT_THREADS)
+)
 
-    global _thread_semaphore
-    if _thread_semaphore is None:
-        _thread_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_THREADS)
-    return _thread_semaphore
+
+def _get_semaphore() -> asyncio.Semaphore:
+    """Get the singleton thread semaphore."""
+    return _thread_semaphore.get()
 
 async def bounded_to_thread(
     func: Callable[..., Any],

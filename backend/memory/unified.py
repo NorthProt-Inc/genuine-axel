@@ -6,12 +6,14 @@ from backend.core.utils.timezone import VANCOUVER_TZ
 if TYPE_CHECKING:
     pass
 from backend.core.logging import get_logger
+from backend.core.utils.text import truncate_text
 
 _log = get_logger("memory.unified")
 
 from backend.config import (
     MAX_CONTEXT_TOKENS,
     MEMORY_LONG_TERM_BUDGET,
+    MEMORY_SESSION_ARCHIVE_BUDGET,
     MEMORY_TIME_CONTEXT_BUDGET,
     CHROMADB_PATH,
 )
@@ -42,16 +44,37 @@ class MemoryManager:
 
     MAX_CONTEXT_TOKENS = MAX_CONTEXT_TOKENS
     LONG_TERM_BUDGET = MEMORY_LONG_TERM_BUDGET
+    SESSION_ARCHIVE_BUDGET = MEMORY_SESSION_ARCHIVE_BUDGET
     TIME_CONTEXT_BUDGET = MEMORY_TIME_CONTEXT_BUDGET
 
     def __init__(
         self,
-        model: Any = None,
+        client: Any = None,
+        model_name: str | None = None,
         working_memory: WorkingMemory = None,
         session_archive: SessionArchive = None,
         long_term_memory: LongTermMemory = None,
+        # Backward compat: accept model= kwarg and ignore it
+        model: Any = None,
     ):
-        self.model = model
+        from google import genai
+
+        if client is None and model is None:
+            from backend.core.utils.gemini_client import get_gemini_client
+            client = get_gemini_client()
+        elif client is None and isinstance(model, genai.Client):
+            # Accept genai.Client passed as model= for backward compat
+            client = model
+        elif client is None and model is not None:
+            # Legacy GenerativeModelWrapper — extract .client
+            client = getattr(model, "client", None)
+
+        self.client = client
+        self.model_name = model_name
+        if not self.model_name:
+            from backend.core.utils.gemini_client import get_model_name
+            self.model_name = get_model_name()
+
         self.working = working_memory or WorkingMemory()
         self.session_archive = session_archive or SessionArchive()
         self.long_term = long_term_memory or LongTermMemory()
@@ -60,12 +83,13 @@ class MemoryManager:
 
         self.memgpt = MemGPTManager(
             long_term_memory=self.long_term,
-            model=model,
+            client=client,
+            model_name=self.model_name,
             config=MemGPTConfig()
         )
 
         self.knowledge_graph = KnowledgeGraph()
-        self.graph_rag = GraphRAG(model=model, graph=self.knowledge_graph)
+        self.graph_rag = GraphRAG(client=client, model_name=self.model_name, graph=self.knowledge_graph)
 
         self._write_lock = threading.Lock()
         self._read_semaphore = threading.Semaphore(5)
@@ -195,145 +219,8 @@ class MemoryManager:
                 _log.debug("GraphRAG query skipped (sync)", error=str(e))
 
         context_text = "\n\n".join(context_parts)
-        max_chars = self.MAX_CONTEXT_TOKENS * 4
-        if max_chars > 0 and len(context_text) > max_chars:
-            suffix = "\n... (truncated)"
-            keep = max_chars - len(suffix)
-            if keep > 0:
-                context_text = context_text[:keep].rstrip() + suffix
-            else:
-                context_text = context_text[:max_chars]
+        context_text = truncate_text(context_text, self.MAX_CONTEXT_TOKENS * 4)
 
-        return context_text
-
-    async def _build_smart_context_async(
-        self,
-        current_query: str
-    ) -> str:
-
-        import asyncio
-        context_parts = []
-
-        time_context = self._build_time_context()
-        if time_context:
-            context_parts.append(f"## 시간 컨텍스트\n{time_context}")
-
-        working_context = self.working.get_progressive_context()
-        if working_context:
-            context_parts.append(f"## 현재 대화 (최근 {self.working.get_turn_count()}턴, Progressive)\n{working_context}")
-
-        if current_query:
-
-            from .temporal import parse_temporal_query
-            temporal_filter = parse_temporal_query(current_query)
-
-            if temporal_filter:
-                _log.debug("Temporal filter detected", filter_type=temporal_filter.get("type"))
-
-            async def get_memgpt_context():
-                try:
-                    return await asyncio.to_thread(
-                        self.memgpt.context_budget_select,
-                        current_query,
-                        self.LONG_TERM_BUDGET,
-                        None,
-                        temporal_filter
-                    )
-                except Exception as e:
-                    _log.warning("MemGPT selection failed", error=str(e))
-                    return None, 0
-
-            async def get_session_archive_context():
-                try:
-
-                    if temporal_filter:
-                        filter_type = temporal_filter.get("type")
-                        if filter_type == "exact":
-                            from_date = temporal_filter.get("date")
-                            return await asyncio.to_thread(
-                                self.session_archive.get_sessions_by_date,
-                                from_date,
-                                None,
-                                5,
-                                self.SESSION_ARCHIVE_BUDGET
-                            )
-                        elif filter_type == "range":
-                            from_date = temporal_filter.get("from")
-                            to_date = temporal_filter.get("to")
-                            return await asyncio.to_thread(
-                                self.session_archive.get_sessions_by_date,
-                                from_date,
-                                to_date,
-                                10,
-                                self.SESSION_ARCHIVE_BUDGET
-                            )
-
-                    return await asyncio.to_thread(
-                        self.session_archive.get_recent_summaries,
-                        10,
-                        self.SESSION_ARCHIVE_BUDGET
-                    )
-                except Exception as e:
-                    _log.debug("Session archive fetch failed", error=str(e))
-                    return ""
-
-            async def get_graph_context():
-                if not self.graph_rag:
-                    return None
-                try:
-                    return await asyncio.to_thread(
-                        self.graph_rag.query_sync,
-                        current_query
-                    )
-                except Exception as e:
-                    _log.debug("GraphRAG query skipped", error=str(e))
-                    return None
-
-            results = await asyncio.gather(
-                get_memgpt_context(),
-                get_session_archive_context(),
-                get_graph_context(),
-                return_exceptions=True
-            )
-
-            memgpt_result = results[0] if not isinstance(results[0], Exception) else None
-            session_context = results[1] if not isinstance(results[1], Exception) else None
-            graph_result = results[2] if not isinstance(results[2], Exception) else None
-
-            for i, (name, res) in enumerate(zip(["longterm", "sessions", "graph"], results)):
-                if isinstance(res, Exception):
-                    _log.warning("Memory task failed", task=name, error=str(res)[:100])
-
-            if memgpt_result:
-                selected_memories, tokens_used = memgpt_result
-                if selected_memories:
-                    memory_lines = []
-                    for mem in selected_memories:
-                        score_str = f"[{mem.score:.2f}]" if mem.score else ""
-                        memory_lines.append(f"- {score_str} {mem.content[:200]}...")
-
-                    context_parts.append(f"## 관련 장기 기억 ({len(selected_memories)}개, {tokens_used} tokens)\n" + "\n".join(memory_lines))
-                    _log.debug("MEM longterm_qry", selected=len(selected_memories), tokens=tokens_used)
-
-            if session_context:
-                if session_context and "최근 대화 기록이 없습니다" not in session_context:
-                    context_parts.append(f"## 최근 세션 기록\n{session_context}")
-
-            if graph_result:
-                if graph_result.context:
-                    context_parts.append(f"## 관계 기반 지식\n{graph_result.context}")
-                    _log.debug("MEM graph_qry", entities=len(graph_result.entities), rels=len(graph_result.relations))
-
-        context_text = "\n\n".join(context_parts)
-        max_chars = self.MAX_CONTEXT_TOKENS * 4
-        if max_chars > 0 and len(context_text) > max_chars:
-            suffix = "\n... (truncated)"
-            keep = max_chars - len(suffix)
-            if keep > 0:
-                context_text = context_text[:keep].rstrip() + suffix
-            else:
-                context_text = context_text[:max_chars]
-            _log.debug("MEM context_truncated", chars=len(context_text), limit=max_chars)
         return context_text
 
     def _build_time_context(self) -> str:
@@ -450,7 +337,7 @@ class MemoryManager:
         Returns:
             Summary dict with topics, tone, facts, insights or None
         """
-        if not self.model or not messages:
+        if not self.client or not messages:
             return None
 
         conversation = "\n".join([
@@ -461,14 +348,11 @@ class MemoryManager:
         prompt = SESSION_SUMMARY_PROMPT.format(conversation=conversation)
 
         try:
-            import asyncio
-
-            response = await asyncio.to_thread(
-                self.model.generate_content_sync,
+            response = await self.client.aio.models.generate_content(
+                model=self.model_name,
                 contents=prompt,
-                stream=False
             )
-            text = response.text
+            text = response.text if response.text else ""
 
             import json
             json_start = text.find('{')
@@ -619,7 +503,6 @@ class MemoryManager:
         if not self.working:
             return False
         try:
-            import asyncio
             return await asyncio.to_thread(self.working.save_to_disk)
         except Exception:
             return False

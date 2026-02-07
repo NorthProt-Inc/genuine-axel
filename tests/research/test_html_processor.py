@@ -1,6 +1,5 @@
 """Tests for HTML processing functions."""
 
-import pytest
 
 
 class TestCleanHtml:

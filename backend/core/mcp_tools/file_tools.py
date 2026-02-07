@@ -2,12 +2,11 @@ from pathlib import Path
 from typing import Any, Sequence
 from mcp.types import TextContent
 from . import register_tool
+from backend.config import MAX_FILE_SIZE
 from backend.core.utils.path_validator import validate_path, sanitize_path
 from backend.core.logging.logging import get_logger
 
 _log = get_logger("mcp.file_tools")
-
-MAX_FILE_SIZE = 10 * 1024 * 1024
 
 @register_tool(
     "read_file",

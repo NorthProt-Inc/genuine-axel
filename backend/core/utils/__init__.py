@@ -1,4 +1,4 @@
-from .gemini_wrapper import GenerativeModelWrapper as GenerativeModelWrapper
+from .gemini_client import get_gemini_client as get_gemini_client
 from .async_utils import *
 from .file_utils import *
 from .pdf import convert_pdf_to_images as convert_pdf_to_images
@@ -20,6 +20,7 @@ from .retry import (
     calculate_backoff as calculate_backoff,
     retry_async as retry_async,
     retry_sync as retry_sync,
+    retry_async_generator as retry_async_generator,
 )
 from .cache import (
     TTLCache as TTLCache,
@@ -44,3 +45,4 @@ from .task_tracker import (
     TaskTracker as TaskTracker,
     get_task_tracker as get_task_tracker,
 )
+from .text import truncate_text as truncate_text

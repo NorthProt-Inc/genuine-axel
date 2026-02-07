@@ -217,6 +217,40 @@ class ChromaDBRepository:
             _log.error("Update failed", error=str(e), doc_id=doc_id)
             return False
 
+    def update_document(
+        self,
+        doc_id: str,
+        document: str,
+        embedding: List[float],
+    ) -> bool:
+        """Update document content and embedding.
+
+        Args:
+            doc_id: Document ID to update
+            document: New document content
+            embedding: New embedding vector
+
+        Returns:
+            True if successful
+        """
+        try:
+            self._collection.update(
+                ids=[doc_id],
+                documents=[document],
+                embeddings=[embedding],
+            )
+            _log.debug("Document updated", id=doc_id[:8])
+            return True
+
+        except Exception as e:
+            _log.error(
+                "Document update failed",
+                error=str(e),
+                error_type=type(e).__name__,
+                doc_id=doc_id,
+            )
+            return False
+
     def delete(self, doc_ids: List[str]) -> int:
         """Delete memories by ID.
 
