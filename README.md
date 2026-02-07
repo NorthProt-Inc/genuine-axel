@@ -299,7 +299,7 @@ SessionArchive
 | Property | Value |
 |----------|-------|
 | Technology | ChromaDB |
-| Embedding Model | Google Gemini `text-embedding-004` (768-dim) |
+| Embedding Model | Google Gemini `text-embedding-001` (3,072-dim) |
 | Storage | `data/chroma_db/` |
 | Implementation | `backend/memory/permanent/` |
 
