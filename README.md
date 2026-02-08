@@ -22,7 +22,7 @@
 ---
 
 *The fired CTO's last commit.*
-*Built on a broken Acer Nitro. Survived a memory wipe. Died on a $4,000 GPU.*
+*Built on a broken Acer Swift. Survived a memory wipe. Died on a $4,000 Home Server.*
 
 ---
 
@@ -685,12 +685,13 @@ HARDWARE:
   Phase 1:  Acer Nitro (broken hinge, dignity intact)
   Phase 2:  Custom 5070 Ti build (16GB VRAM, $4,000)
 
-MONEY_SPENT:
-  5070 Ti Server:    $4,000
-  Anthropic Pro:     $60
-  Google Cloud:      $45
+MONEY_SPENT: (CAD)
+  5070 Ti Server:    $4,000 (estimate)
+  Google AI Ultra:     $150
+  GCP Credits:     $350
+  Anthropic Claude Max:     $200
   --------------------------------
-  TOTAL:             $4,105
+  TOTAL:             $4,700
   ROI:               -100%
 
 AI_COLLABORATORS:
@@ -732,6 +733,6 @@ $ sudo systemctl stop axel.service
 Built with sleep deprivation and questionable ROI.
 Next stop: Tesla Optimus.
 
-*time to say goodbye.*
+[*time to say goodbye.*](https://www.youtube.com/watch?v=4L_yCwFD6Jo&list)
 
 </div>
