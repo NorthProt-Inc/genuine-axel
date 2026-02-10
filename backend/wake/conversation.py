@@ -24,7 +24,7 @@ def split_sentences(text: str) -> List[str]:
     sentences = [s.strip() for s in sentences if s.strip()]
     return sentences if sentences else [text]
 
-API_BASE = os.environ.get("AXNMIHN_API", "http://localhost:8000")
+API_BASE = os.environ.get("AXNMIHN_API", "http://localhost:8001")
 API_KEY = os.environ.get("AXNMIHN_API_KEY") or os.environ.get("API_KEY")
 
 def _auth_headers() -> dict:

@@ -5,7 +5,7 @@ main backend. Includes queue limiting, synthesis timeout, and idle unload.
 
 Usage:
     python -m backend.media.tts_service [host] [port]
-    python -m backend.media.tts_service 127.0.0.1 8001
+    python -m backend.media.tts_service 127.0.0.1 8002
 """
 
 import asyncio
@@ -129,7 +129,7 @@ async def health():
 
 if __name__ == "__main__":
     host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-    port = int(sys.argv[2]) if len(sys.argv) > 2 else 8001
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else 8002
 
     _logger.info("TTS service launching", host=host, port=port)
 
