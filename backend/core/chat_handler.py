@@ -175,7 +175,7 @@ class ChatHandler:
                     try:
                         await self.state.memory_manager.end_session(
                             allow_llm_summary=True,
-                            summary_timeout_seconds=10.0,
+                            summary_timeout_seconds=30.0,
                             allow_fallback_summary=True,
                         )
                     except Exception as e:
