@@ -30,6 +30,15 @@ class PgSessionRepository:
 
     # ── Messages ─────────────────────────────────────────────────────
 
+    def _ensure_session_exists(self, cur: Any, session_id: str, timestamp: str) -> None:
+        """Create session row if it doesn't exist (avoids FK violation on messages)."""
+        cur.execute(
+            """INSERT INTO sessions (session_id, user_id, started_at)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (session_id) DO NOTHING""",
+            (session_id, "Mark", timestamp),
+        )
+
     def save_message_immediate(
         self,
         session_id: str,
@@ -41,6 +50,8 @@ class PgSessionRepository:
         try:
             with self._conn.get_connection() as conn:
                 with conn.cursor() as cur:
+                    self._ensure_session_exists(cur, session_id, timestamp)
+
                     cur.execute(
                         "SELECT COALESCE(MAX(turn_id), -1) + 1 FROM messages WHERE session_id = %s",
                         (session_id,),
@@ -76,6 +87,30 @@ class PgSessionRepository:
         try:
             with self._conn.get_connection() as conn:
                 with conn.cursor() as cur:
+                    # Upsert session first to satisfy FK on messages
+                    cur.execute(
+                        """INSERT INTO sessions
+                               (session_id, user_id, summary, key_topics, emotional_tone,
+                                turn_count, started_at, ended_at)
+                           VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s, %s)
+                           ON CONFLICT (session_id) DO UPDATE SET
+                               summary = EXCLUDED.summary,
+                               key_topics = EXCLUDED.key_topics,
+                               emotional_tone = EXCLUDED.emotional_tone,
+                               turn_count = EXCLUDED.turn_count,
+                               ended_at = EXCLUDED.ended_at""",
+                        (
+                            session_id,
+                            "Mark",
+                            summary,
+                            json.dumps(key_topics, ensure_ascii=False),
+                            emotional_tone,
+                            turn_count,
+                            started_at.isoformat(),
+                            ended_at.isoformat(),
+                        ),
+                    )
+
                     if messages:
                         cur.execute(
                             "SELECT COALESCE(MAX(turn_id), -1) + 1 FROM messages WHERE session_id = %s",
@@ -103,29 +138,6 @@ class PgSessionRepository:
                                ON CONFLICT (session_id, turn_id, role) DO NOTHING""",
                             message_data,
                         )
-
-                    cur.execute(
-                        """INSERT INTO sessions
-                               (session_id, user_id, summary, key_topics, emotional_tone,
-                                turn_count, started_at, ended_at)
-                           VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s, %s)
-                           ON CONFLICT (session_id) DO UPDATE SET
-                               summary = EXCLUDED.summary,
-                               key_topics = EXCLUDED.key_topics,
-                               emotional_tone = EXCLUDED.emotional_tone,
-                               turn_count = EXCLUDED.turn_count,
-                               ended_at = EXCLUDED.ended_at""",
-                        (
-                            session_id,
-                            "Mark",
-                            summary,
-                            json.dumps(key_topics, ensure_ascii=False),
-                            emotional_tone,
-                            turn_count,
-                            started_at.isoformat(),
-                            ended_at.isoformat(),
-                        ),
-                    )
 
             _log.info(
                 "MEM session_save",
