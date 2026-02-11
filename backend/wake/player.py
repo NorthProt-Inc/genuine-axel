@@ -8,7 +8,6 @@ RESOURCES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__f
 
 class AudioPlayer:
     def __init__(self, device_index=None):
-
         self.sink_name = "alsa_output.pci-0000_0c_00.1.hdmi-stereo"
 
         self.sounds = {
@@ -21,7 +20,6 @@ class AudioPlayer:
         _log.debug("aud player init", sounds=len(self.sounds))
 
     def play(self, sound_name: str = "ready"):
-
         sound_path = self.sounds.get(sound_name, self.sounds["beep"])
 
         if not os.path.exists(sound_path):
@@ -41,7 +39,6 @@ class AudioPlayer:
             _log.error("aud play err", name=sound_name, err=str(e))
 
     def close(self):
-
         _log.debug("aud player closed")
 
 if __name__ == "__main__":

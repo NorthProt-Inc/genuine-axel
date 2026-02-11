@@ -18,7 +18,6 @@ router = APIRouter(tags=["Status"])
 
 @router.get("/auth/status")
 async def auth_status(request: Request):
-
     authorized = is_request_authorized(request)
     return {
         "is_admin": authorized,
@@ -29,19 +28,16 @@ async def auth_status(request: Request):
 
 @router.get("/llm/providers")
 def get_llm_providers():
-
     return {"providers": get_all_providers(), "default": DEFAULT_PROVIDER}
 
 @router.get("/models")
 def get_available_models():
-
     return {
         "models": get_all_models(),
         "default": "gemini",
     }
 
 def _check_env_key(key: str) -> Dict[str, Any]:
-
     value = os.getenv(key, "")
     return {
         "configured": bool(value),
@@ -49,7 +45,6 @@ def _check_env_key(key: str) -> Dict[str, Any]:
     }
 
 def _check_module_health(name: str, obj: Any, extra_checks: Dict[str, Any] = None) -> Dict[str, Any]:
-
     result = {
         "status": "ok" if obj else "unavailable",
         "initialized": obj is not None,
@@ -60,7 +55,6 @@ def _check_module_health(name: str, obj: Any, extra_checks: Dict[str, Any] = Non
 
 @router.get("/health")
 async def health_check():
-
     state = get_state()
     now = datetime.now(VANCOUVER_TZ)
 
@@ -165,7 +159,6 @@ async def health_check():
 
 @router.get("/health/quick")
 async def health_quick():
-
     state = get_state()
 
     memory_ok = state.memory_manager is not None
@@ -192,10 +185,8 @@ async def metrics_endpoint():
 
 @router.get("/code/summary", dependencies=[Depends(require_api_key)])
 async def code_summary():
-
     return {"summary": get_code_summary()}
 
 @router.get("/code/files", dependencies=[Depends(require_api_key)])
 async def code_files():
-
     return {"files": list_source_files()}

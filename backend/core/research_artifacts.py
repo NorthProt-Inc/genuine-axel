@@ -15,13 +15,11 @@ MAX_SUMMARY_LINES = 5
 MAX_SUMMARY_CHARS = 500
 
 def should_save_as_artifact(content: str) -> bool:
-
     if not content:
         return False
     return len(content) > ARTIFACT_THRESHOLD
 
 def generate_summary(content: str, max_lines: int = MAX_SUMMARY_LINES) -> str:
-
     if not content:
         return "No content"
 
@@ -78,7 +76,6 @@ def generate_summary(content: str, max_lines: int = MAX_SUMMARY_LINES) -> str:
     return summary if summary else "Content summary unavailable"
 
 def _sanitize_filename(url: str) -> str:
-
     parsed = urlparse(url)
     domain = parsed.netloc.replace('.', '-').replace(':', '-')
 
@@ -93,7 +90,6 @@ def _sanitize_filename(url: str) -> str:
     return filename
 
 def save_artifact(url: str, content: str) -> Tuple[Path, str]:
-
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
     filename = _sanitize_filename(url)
@@ -120,7 +116,6 @@ content_length: {len(content)}
     return filepath, summary
 
 def create_artifact_reference(url: str, filepath: Path, summary: str) -> str:
-
     relative_path = str(filepath)
 
     return f"""[ARTIFACT SAVED]
@@ -132,7 +127,6 @@ def create_artifact_reference(url: str, filepath: Path, summary: str) -> str:
 Use `read_artifact` tool with path="{relative_path}" if detailed content needed."""
 
 def read_artifact(filepath: str) -> Optional[str]:
-
     try:
         path = Path(filepath)
 
@@ -161,7 +155,6 @@ def read_artifact(filepath: str) -> Optional[str]:
         return None
 
 def process_content_for_artifact(url: str, content: str) -> str:
-
     if not should_save_as_artifact(content):
         return content
 

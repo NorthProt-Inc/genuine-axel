@@ -13,7 +13,6 @@ from backend.core.logging import get_logger
 _log = get_logger("memory.current")
 
 def normalize_role(role: str) -> str:
-
     role_lower = role.lower()
     if role_lower == "user":
         return "Mark"
@@ -23,14 +22,12 @@ def normalize_role(role: str) -> str:
 
 @dataclass
 class TimestampedMessage:
-
     role: str
     content: str
     timestamp: datetime = field(default_factory=now_vancouver)
     emotional_context: str = "neutral"
 
     def get_relative_time(self, reference: Optional[datetime] = None) -> str:
-
         ref = reference or now_vancouver()
         ts = ensure_aware(self.timestamp)
         elapsed = ref - ts
@@ -49,11 +46,9 @@ class TimestampedMessage:
             return self.timestamp.strftime("%Y-%m-%d")
 
     def get_absolute_time(self) -> str:
-
         return self.timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
     def format_for_context(self, include_time: bool = True) -> str:
-
         if include_time:
             return f"[{self.get_relative_time()} | {self.timestamp.strftime('%H:%M')}] {self.role}: {self.content}"
         return f"{self.role}: {self.content}"
@@ -67,13 +62,11 @@ class TimestampedMessage:
         }
 
 class WorkingMemory:
-
     MAX_TURNS = CONTEXT_WORKING_TURNS
     SQL_PERSIST_TURNS = CONTEXT_SQL_PERSIST_TURNS
     PERSISTENCE_PATH = str(WORKING_MEMORY_PATH)
 
     def __init__(self):
-
         self._messages: Deque[TimestampedMessage] = deque(maxlen=self.MAX_TURNS * 2)
         self._lock = threading.Lock()
         self.session_id: str = str(uuid.uuid4())
@@ -82,12 +75,10 @@ class WorkingMemory:
 
     @property
     def messages(self) -> List[TimestampedMessage]:
-
         with self._lock:
             return list(self._messages)
 
     def add(self, role: str, content: str, emotional_context: str = "neutral") -> TimestampedMessage:
-
         normalized_role = normalize_role(role)
 
         msg = TimestampedMessage(
@@ -104,7 +95,6 @@ class WorkingMemory:
         return msg
 
     def get_context(self, max_turns: Optional[int] = None) -> str:
-
         turns = max_turns or self.MAX_TURNS
 
         recent = self.messages[-(turns * 2):]
@@ -117,7 +107,6 @@ class WorkingMemory:
         ])
 
     def get_time_elapsed_context(self) -> str:
-
         with self._lock:
             if not self._messages:
                 return " 첫 대화 시작 - 자연스럽게 인사해."
@@ -144,19 +133,16 @@ class WorkingMemory:
             return f" {elapsed.days}일 만에 대화 재개 - 오랜만이니 안부부터 시작."
 
     def get_messages(self) -> List[TimestampedMessage]:
-
         with self._lock:
             return list(self._messages)
 
     def flush(self) -> List[TimestampedMessage]:
-
         with self._lock:
             messages = list(self._messages)
             self._messages.clear()
         return messages
 
     def reset_session(self) -> str:
-
         old_id = self.session_id
         self.session_id = str(uuid.uuid4())
         self.session_start = now_vancouver()
@@ -180,7 +166,6 @@ class WorkingMemory:
             return len(self._messages) > 0
 
     def get_progressive_context(self, full_turns: int = 10) -> str:
-
         messages = self.messages
         full_count = full_turns * 2
 
@@ -209,12 +194,10 @@ class WorkingMemory:
         return "\n".join(compressed + full)
 
     def get_messages_for_sql(self, max_turns: Optional[int] = None) -> List[TimestampedMessage]:
-
         turns = max_turns or self.SQL_PERSIST_TURNS
         return self.messages[-(turns * 2):]
 
     def save_to_disk(self, path: Optional[str] = None) -> bool:
-
         path = path or self.PERSISTENCE_PATH
         try:
             with self._lock:
@@ -239,7 +222,6 @@ class WorkingMemory:
             return False
 
     def load_from_disk(self, path: Optional[str] = None) -> bool:
-
         path = path or self.PERSISTENCE_PATH
         try:
             if not Path(path).exists():

@@ -9,7 +9,7 @@ from google import genai
 
 from backend.config import EMBEDDING_MAX_RETRIES
 from backend.core.logging import get_logger
-from backend.core.resilience.circuit_breaker import CircuitBreaker
+from backend.core.utils.circuit_breaker import EMBEDDING_CIRCUIT
 from .config import MemoryConfig
 
 _log = get_logger("memory.embedding")
@@ -48,7 +48,7 @@ class EmbeddingService:
         self.embedding_model = embedding_model or MemoryConfig.EMBEDDING_MODEL
         self._cache_size = cache_size or MemoryConfig.EMBEDDING_CACHE_SIZE
         self._cache: Dict[str, List[float]] = {}
-        self._breaker = CircuitBreaker("embedding", failure_threshold=3, cooldown_sec=30.0)
+        self._breaker = EMBEDDING_CIRCUIT
 
     def get_embedding(
         self,
@@ -68,7 +68,7 @@ class EmbeddingService:
             _log.warning("GenAI client not available for embedding")
             return None
 
-        if not self._breaker.allow_request():
+        if not self._breaker.can_execute():
             _log.warning("Embedding circuit open, returning None")
             return None
 

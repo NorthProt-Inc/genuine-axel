@@ -269,3 +269,18 @@ class TestRegressions:
         """/tmp was in ALLOWED_DIRECTORIES — attacker could read world-readable files."""
         r = psm.validate("/tmp/stolen_data.txt", PathAccessType.READ_ANY)
         assert r.valid is False
+
+
+# ---------------------------------------------------------------------------
+# TestPermissionDeniedPath
+# ---------------------------------------------------------------------------
+
+
+class TestPermissionDeniedPath:
+    """Inaccessible paths (e.g. /root/) must return valid=False, not raise."""
+
+    def test_root_path_rejected_gracefully(self, psm: PathSecurityManager) -> None:
+        """'/root/...' should be rejected without raising PermissionError."""
+        r = psm.validate("/root/axnmihn-backend/README.md", PathAccessType.READ_ANY)
+        assert r.valid is False
+        assert r.error is not None

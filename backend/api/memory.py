@@ -10,7 +10,6 @@ router = APIRouter(tags=["Memory"], dependencies=[Depends(require_api_key)])
 
 @router.post("/memory/consolidate")
 async def consolidate_memory():
-
     state = get_state()
 
     if state.long_term_memory:
@@ -101,7 +100,6 @@ async def _evolve_persona_from_memories():
 
 @router.get("/memory/stats")
 async def get_memory_stats():
-
     state = get_state()
 
     if state.memory_manager:
@@ -112,7 +110,6 @@ async def get_memory_stats():
 
 @router.post("/session/end")
 async def end_session():
-
     state = get_state()
 
     if not state.memory_manager:
@@ -128,7 +125,6 @@ async def end_session():
 
 @router.get("/memory/sessions")
 async def get_sessions():
-
     state = get_state()
 
     if not state.memory_manager or not state.memory_manager.session_archive:
@@ -144,7 +140,6 @@ async def get_sessions():
 
 @router.get("/memory/search")
 async def search_memory(query: str, limit: int = 20):
-
     state = get_state()
 
     results = []
@@ -195,7 +190,6 @@ async def search_memory(query: str, limit: int = 20):
 
 @router.get("/memory/session/{session_id}")
 async def get_session_detail(session_id: str):
-
     state = get_state()
 
     if not state.memory_manager or not state.memory_manager.session_archive:

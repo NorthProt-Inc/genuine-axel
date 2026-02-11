@@ -12,23 +12,19 @@ _log = get_logger("core.ai_brain")
 _DEFAULT_PERSONA_PATH = Path(__file__).parent.parent.parent.parent / "data" / "dynamic_persona.json"
 
 class IdentityManager:
-
     def __init__(self, persona_path: str = None):
-
         self.persona_path = Path(persona_path) if persona_path else _DEFAULT_PERSONA_PATH
         self.persona: Dict[str, Any] = self._load_persona()
         self._last_mtime: float = self._get_file_mtime()
         self._ensure_data_dir()
 
     def _get_file_mtime(self) -> float:
-
         try:
             return self.persona_path.stat().st_mtime if self.persona_path.exists() else 0
         except Exception:
             return 0
 
     def _maybe_reload(self) -> bool:
-
         current_mtime = self._get_file_mtime()
         if current_mtime > self._last_mtime:
             self.persona = self._load_persona()
@@ -38,11 +34,9 @@ class IdentityManager:
         return False
 
     def _ensure_data_dir(self):
-
         self.persona_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _load_persona(self) -> Dict[str, Any]:
-
         if self.persona_path.exists():
             try:
                 with open(self.persona_path, 'r', encoding='utf-8') as f:
@@ -68,7 +62,6 @@ class IdentityManager:
         return {}
 
     async def _save_persona(self):
-
         import asyncio
 
         json_data = json.dumps(self.persona, ensure_ascii=False, indent=2)
@@ -123,7 +116,6 @@ class IdentityManager:
             raise
 
     async def evolve(self, insights: List[str]) -> int:
-
         added = 0
 
         if not isinstance(self.persona.get("learned_behaviors"), list):
@@ -151,7 +143,6 @@ class IdentityManager:
         return added
 
     def _is_new_insight(self, insight: str) -> bool:
-
         insight_lower = insight.lower().strip()
         for behavior in self.persona.get("learned_behaviors", []):
             existing = behavior.get("insight", "").lower().strip()
@@ -161,20 +152,17 @@ class IdentityManager:
         return True
 
     async def update_preference(self, key: str, value: Any):
-
         self.persona["user_preferences"][key] = value
         self.persona["last_updated"] = datetime.now(VANCOUVER_TZ).isoformat()
         await self._save_persona()
 
     async def add_relationship_note(self, note: str):
-
         if note not in self.persona.get("relationship_notes", []):
             self.persona["relationship_notes"].append(note)
             self.persona["last_updated"] = datetime.now(VANCOUVER_TZ).isoformat()
             await self._save_persona()
 
     def get_system_prompt(self, include_recent_behaviors: int = 10) -> str:
-
         self._maybe_reload()
 
         core = self.persona.get("core_identity", "")
@@ -247,7 +235,6 @@ class IdentityManager:
         return prompt
 
     def get_stats(self) -> Dict[str, Any]:
-
         behaviors = self.persona.get("learned_behaviors", [])
         return {
             "version": self.persona.get("version", 1),
@@ -258,7 +245,6 @@ class IdentityManager:
         }
 
     async def reset(self, keep_core_identity: bool = True):
-
         if keep_core_identity:
             core = self.persona.get("core_identity")
             self.persona = {}

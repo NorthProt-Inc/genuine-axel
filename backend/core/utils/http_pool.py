@@ -20,7 +20,6 @@ async def get_client(
     headers: Optional[Dict[str, str]] = None,
     timeout: Optional[float] = None,
 ) -> httpx.AsyncClient:
-
     async with _lock:
         if service not in _clients:
             service_timeout = timeout or SERVICE_TIMEOUTS.get(service, SERVICE_TIMEOUTS["default"])
@@ -37,7 +36,6 @@ async def get_client(
         return _clients[service]
 
 async def close_all() -> int:
-
     async with _lock:
         cnt = len(_clients)
         _log.debug("Pool cleanup starting", client_cnt=cnt)

@@ -47,7 +47,6 @@ def validate_path(
 
 
 def _is_subpath(path: Path, parent: Path) -> bool:
-
     try:
         path.relative_to(parent)
         return True
@@ -56,7 +55,6 @@ def _is_subpath(path: Path, parent: Path) -> bool:
 
 
 def sanitize_path(path_str: str) -> str:
-
     if not path_str:
         return path_str
 

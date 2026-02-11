@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from typing import Dict, List, Optional, Any
 
 from .utils import _log, GraphRAGConfig
@@ -10,7 +11,6 @@ from .relationship_extractor import RelationshipExtractor
 
 
 class GraphRAG:
-
     def __init__(
         self,
         client=None,
@@ -152,7 +152,9 @@ class GraphRAG:
 
         context = self._format_graph_context(entities, relations, paths)
 
-        relevance_score = min(len(entities) * 0.2, 1.0)
+        # W4-1: LLM relevance evaluation (fallback to entity-count heuristic)
+        arithmetic_score = min(len(entities) * 0.2, 1.0)
+        relevance_score = await self._evaluate_relevance(query, context, arithmetic_score)
 
         return GraphQueryResult(
             entities=entities,
@@ -198,6 +200,48 @@ JSON 배열로 응답 (엔티티 이름만):
         except Exception as e:
             _log.warning("Query entity extraction failed", error=str(e))
             return []
+
+    async def _evaluate_relevance(
+        self, query: str, context: str, fallback: float
+    ) -> float:
+        """Evaluate relevance of graph context to query using LLM.
+
+        Args:
+            query: Original user query
+            context: Formatted graph context string
+            fallback: Arithmetic fallback score
+
+        Returns:
+            Relevance score 0.0-1.0
+        """
+        if not self.client or not context:
+            return fallback
+
+        prompt = f"""다음 그래프 컨텍스트가 질문에 얼마나 관련성이 있는지 평가하세요.
+
+질문: "{query[:300]}"
+
+컨텍스트:
+{context[:500]}
+
+관련성 점수를 0.0~1.0 사이의 숫자만 응답하세요 (예: 0.75):"""
+
+        try:
+            response = await asyncio.wait_for(
+                self.client.aio.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                ),
+                timeout=15.0,
+            )
+            text = response.text if response.text else ""
+            match = re.search(r"(0\.\d+|1\.0|1)", text.strip())
+            if match:
+                return float(match.group(1))
+        except Exception as e:
+            _log.debug("GraphRAG relevance eval fallback", error=str(e)[:80])
+
+        return fallback
 
     def _format_graph_context(
         self,

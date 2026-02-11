@@ -142,8 +142,9 @@ class RelationshipExtractor:
                     entity_type=e.get("type", "concept"),
                     properties={"importance": float(e.get("importance", 0.7))},
                 )
-                self.graph.add_entity(entity)
-                added_entities.append(entity_id)
+                result_id = self.graph.add_entity(entity)
+                if result_id:
+                    added_entities.append(result_id)
             if added_entities:
                 self.graph.save()
             return {
@@ -230,9 +231,10 @@ JSON 응답만 (설명 없이):
                     entity_type=e.get("type", "concept"),
                     properties={"importance": importance}
                 )
-                self.graph.add_entity(entity)
-                entity_map[e["name"]] = entity_id
-                added_entities.append(entity_id)
+                result_id = self.graph.add_entity(entity)
+                if result_id:
+                    entity_map[e["name"]] = result_id
+                    added_entities.append(result_id)
 
             for r in data.get("relations", []):
                 source_id = entity_map.get(r["source"])

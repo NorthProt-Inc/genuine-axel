@@ -229,7 +229,6 @@ async def list_tools() -> list[Tool]:
 
 @research_server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
-
     start_time = time.time()
     _log.info("REQ handling", tool=name, params=list(arguments.keys()))
 
@@ -281,7 +280,6 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent | type
 
 
 async def run_stdio():
-
     from mcp.server.stdio import stdio_server
 
     _log.info("MCP server starting", mode="stdio", tools=6)
@@ -294,13 +292,20 @@ async def run_stdio():
 
 
 async def run_sse(host: str = "0.0.0.0", port: int = 8765):
-
     from fastapi import FastAPI, Request
     from mcp.server.sse import SseServerTransport
     import uvicorn
 
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
+        yield
+        manager = await get_browser_manager()
+        await manager.close()
+
     _log.info("MCP server starting", mode="sse", host=host, port=port, tools=6)
-    app = FastAPI(title="Research MCP Server")
+    app = FastAPI(title="Research MCP Server", lifespan=_lifespan)
     sse = SseServerTransport("/messages/")
 
     @app.get("/sse")
@@ -322,18 +327,12 @@ async def run_sse(host: str = "0.0.0.0", port: int = 8765):
     async def health():
         return {"status": "healthy", "server": "research-mcp"}
 
-    @app.on_event("shutdown")
-    async def shutdown():
-        manager = await get_browser_manager()
-        await manager.close()
-
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)
     await server.serve()
 
 
 async def cleanup():
-
     try:
         manager = await BrowserManager.get_instance()
         if manager._playwright is not None:
@@ -344,7 +343,6 @@ async def cleanup():
 
 
 def main():
-
     import sys
 
     mode = sys.argv[1] if len(sys.argv) > 1 else "stdio"

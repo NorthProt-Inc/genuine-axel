@@ -6,7 +6,7 @@ This module provides:
 """
 
 import time
-from collections import deque
+from collections import Counter, deque
 
 from backend.core.logging import get_logger
 from backend.core.utils.timeouts import TIMEOUTS
@@ -80,12 +80,31 @@ class CircuitBreakerState:
     - half-open: Testing if service recovered
     """
 
+    _COOLDOWN_MAP: dict[str, int] = {
+        "rate_limit": 300,
+        "server_error": 60,
+        "timeout": 30,
+    }
+
     def __init__(self):
         self._state = "closed"
         self._failure_count = 0
         self._last_failure_time = 0.0
         self._cooldown_seconds = CIRCUIT_BREAKER_DURATION
         self._open_until = 0.0
+        self._error_history: deque[str] = deque(maxlen=10)
+
+    def _resolve_cooldown(self) -> tuple[str, int]:
+        """Determine cooldown from the most frequent recent error type.
+
+        Returns:
+            (majority_error_type, cooldown_seconds)
+        """
+        if not self._error_history:
+            return "unknown", CIRCUIT_BREAKER_DURATION
+        counts = Counter(self._error_history)
+        majority_type = counts.most_common(1)[0][0]
+        return majority_type, self._COOLDOWN_MAP.get(majority_type, CIRCUIT_BREAKER_DURATION)
 
     def record_failure(self, error_type: str):
         """Record an API failure and potentially open the circuit.
@@ -95,29 +114,23 @@ class CircuitBreakerState:
         """
         self._failure_count += 1
         self._last_failure_time = time.time()
-
-        # Adjust cooldown based on error type
-        if error_type == "rate_limit":
-            self._cooldown_seconds = 300  # 5 minutes
-        elif error_type == "server_error":
-            self._cooldown_seconds = 60
-        elif error_type == "timeout":
-            self._cooldown_seconds = 30
-        else:
-            self._cooldown_seconds = CIRCUIT_BREAKER_DURATION
+        self._error_history.append(error_type)
 
         # Open circuit after 5 consecutive failures
         if self._failure_count >= 5:
+            majority_type, cooldown = self._resolve_cooldown()
+            self._cooldown_seconds = cooldown
             self._state = "open"
             self._open_until = time.time() + self._cooldown_seconds
             _log.warning("circuit breaker opened",
-                         err_type=error_type,
+                         err_type=majority_type,
                          cooldown_s=self._cooldown_seconds,
                          failures=self._failure_count)
 
     def record_success(self):
         """Record a successful API call and potentially close the circuit."""
         self._failure_count = 0
+        self._error_history.clear()
         if self._state == "half-open":
             self._state = "closed"
             _log.info("circuit breaker closed")

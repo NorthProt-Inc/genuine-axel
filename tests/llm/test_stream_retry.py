@@ -8,12 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.llm.clients import (
-    AnthropicClient,
-    CircuitBreakerState,
-    GeminiClient,
-    _adaptive_timeout,
-)
+from backend.llm.anthropic_client import AnthropicClient
+from backend.llm.circuit_breaker import CircuitBreakerState, _adaptive_timeout
+from backend.llm.gemini_client import GeminiClient
 
 
 # ============================================================================
@@ -385,3 +382,35 @@ class TestAnthropicStreamRetry:
         async for _ in client.generate_stream("test"):
             pass
         assert AnthropicClient._circuit_breaker._failure_count == 0
+
+    # ---- string-based retryable detection (streaming overloaded) ----
+
+    async def test_stream_retries_on_overloaded_string_error(self, client: AnthropicClient) -> None:
+        """Streaming overloaded errors (non-SDK exceptions) should be retried."""
+        overloaded_err = Exception(
+            "{'type': 'error', 'error': {'type': 'overloaded_error'}}"
+        )
+        ok_events = self._make_stream_events(["recovered"])
+        self._setup_stream(client, [[], ok_events], errors=[overloaded_err, None])
+
+        items = []
+        async for text, _, _ in client.generate_stream("test"):
+            items.append(text)
+        assert "recovered" in "".join(items)
+
+    async def test_stream_retries_on_503_status_error(self, client: AnthropicClient) -> None:
+        """APIStatusError with status 503 should be retried."""
+        import anthropic as anth_mod
+        err_503 = anth_mod.APIStatusError(
+            "service unavailable",
+            response=MagicMock(status_code=503, headers={}),
+            body=None,
+        )
+        err_503.status_code = 503
+        ok_events = self._make_stream_events(["ok"])
+        self._setup_stream(client, [[], ok_events], errors=[err_503, None])
+
+        items = []
+        async for text, _, _ in client.generate_stream("test"):
+            items.append(text)
+        assert len(items) > 0

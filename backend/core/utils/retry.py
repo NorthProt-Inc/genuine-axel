@@ -12,7 +12,6 @@ T = TypeVar("T")
 
 @dataclass
 class RetryConfig:
-
     max_retries: int = 5
     base_delay: float = 2.0
     max_delay: float = 60.0
@@ -32,7 +31,6 @@ class RetryConfig:
 DEFAULT_RETRY_CONFIG = RetryConfig()
 
 def is_retryable_error(error: Exception, config: RetryConfig | None = None) -> bool:
-
     config = config or DEFAULT_RETRY_CONFIG
     if config.retryable_check is not None:
         return config.retryable_check(error)
@@ -40,7 +38,6 @@ def is_retryable_error(error: Exception, config: RetryConfig | None = None) -> b
     return any(pattern in error_str for pattern in config.retryable_patterns)
 
 def classify_error(error: Exception) -> str:
-
     error_str = str(error).lower()
 
     if any(x in error_str for x in ["ssl", "certificate", "handshake",

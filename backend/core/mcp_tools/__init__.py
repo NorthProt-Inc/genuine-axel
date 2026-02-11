@@ -70,7 +70,6 @@ def register_tool(
     description: Optional[str] = None,
     input_schema: Optional[dict] = None,
 ):
-
     def decorator(func: Callable):
         if name in _tool_handlers:
             _log.warning("Tool re-registered, overwriting", tool=name)
@@ -108,29 +107,24 @@ def register_tool(
     return decorator
 
 def get_tool_handler(name: str) -> Callable:
-
     if name not in _tool_handlers:
         available = ", ".join(sorted(_tool_handlers.keys())[:10])
         raise ValueError(f"Unknown tool: '{name}'. Available tools include: {available}...")
     return _tool_handlers[name]
 
 def list_tools() -> list[str]:
-
     return sorted(_tool_handlers.keys())
 
 def get_tools_by_category(category: str) -> list[str]:
-
     return [
         name for name, meta in _tool_metadata.items()
         if meta.get("category") == category
     ]
 
 def get_tool_metadata(name: str) -> Optional[Dict[str, Any]]:
-
     return _tool_metadata.get(name)
 
 def is_tool_registered(name: str) -> bool:
-
     return name in _tool_handlers
 
 def get_tool_schemas() -> list[Tool]:
@@ -186,7 +180,6 @@ def reset_metrics(name: Optional[str] = None) -> None:
 
 
 def _load_all_tools():
-
     try:
         package = importlib.import_module("backend.core.mcp_tools")
         package_path = package.__path__

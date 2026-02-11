@@ -74,7 +74,7 @@ class MemoryManagerCore:
 
             self.working = working_memory or WorkingMemory()
             self.session_archive = session_archive or SessionArchive(pg_conn_mgr=pg_conn_mgr)
-            self.long_term = long_term_memory or LongTermMemory(repository=pg_mem_repo)
+            self.long_term = long_term_memory or LongTermMemory(repository=pg_mem_repo, conn_mgr=pg_conn_mgr)
             self.knowledge_graph = KnowledgeGraph(pg_repository=pg_graph_repo)
             self.meta_memory = MetaMemory(pg_repository=pg_meta_repo)
 
@@ -99,6 +99,21 @@ class MemoryManagerCore:
 
         # M0: Event Buffer (session-scoped, in-memory)
         self.event_buffer = EventBuffer()
+
+        # W1-2: Inject MetaMemory into LongTermMemory for consolidation
+        if hasattr(self.long_term, "set_meta_memory"):
+            self.long_term.set_meta_memory(self.meta_memory)
+
+        # W2-2: M0 → M5 event bridge for MEMORY_ACCESSED events
+        async def _on_memory_event(event: StreamEvent) -> None:
+            if event.type == EventType.MEMORY_ACCESSED:
+                self.meta_memory.record_access(
+                    query_text=event.metadata.get("query", ""),
+                    matched_memory_ids=event.metadata.get("memory_ids", []),
+                    channel_id=event.metadata.get("channel_id", "default"),
+                )
+
+        self.event_buffer.register_handler(_on_memory_event)
 
         self._write_lock = threading.Lock()
         self._read_semaphore = threading.Semaphore(5)

@@ -10,7 +10,6 @@ from backend.core.logging import get_logger
 _log = get_logger("protocols.mcp_server")
 
 class MCPMessageType(Enum):
-
     INITIALIZE = "initialize"
     LIST_RESOURCES = "resources/list"
     READ_RESOURCE = "resources/read"
@@ -24,7 +23,6 @@ class MCPMessageType(Enum):
 
 @dataclass
 class MCPResource:
-
     uri: str
     name: str
     description: str
@@ -32,34 +30,29 @@ class MCPResource:
 
 @dataclass
 class MCPTool:
-
     name: str
     description: str
     input_schema: Dict
 
 @dataclass
 class MCPPrompt:
-
     name: str
     description: str
     arguments: List[Dict]
 
 @dataclass
 class MCPRequest:
-
     id: str
     method: str
     params: Dict = field(default_factory=dict)
 
 @dataclass
 class MCPResponse:
-
     id: str
     result: Optional[Any] = None
     error: Optional[Dict] = None
 
 class MCPServer:
-
     SERVER_INFO = {
         "name": "axnmihn-mcp",
         "version": "1.0.0",
@@ -99,7 +92,6 @@ class MCPServer:
         self._setup_prompts()
 
     def _setup_resources(self):
-
         self.register_resource(
             MCPResource(
                 uri="axnmihn://memory/working",
@@ -141,7 +133,6 @@ class MCPServer:
         )
 
     def _setup_tools(self):
-
         self.register_tool(
             MCPTool(
                 name="search",
@@ -200,7 +191,6 @@ class MCPServer:
         )
 
     def _setup_prompts(self):
-
         self.prompts["axnmihn_style"] = MCPPrompt(
             name="axnmihn_style",
             description="axnmihn 스타일 응답 생성",
@@ -339,7 +329,6 @@ class MCPServer:
             )
 
     def _get_working_memory(self) -> Dict:
-
         if not self.memory:
             return {"uri": "axnmihn://memory/working", "text": "Memory not available"}
 
@@ -351,7 +340,6 @@ class MCPServer:
         }
 
     def _get_long_term_memory(self) -> Dict:
-
         if not self.memory or not self.memory.long_term:
             return {"uri": "axnmihn://memory/long_term", "text": "{}"}
 
@@ -363,7 +351,6 @@ class MCPServer:
         }
 
     def _get_persona(self) -> Dict:
-
         if not self.identity:
             return {"uri": "axnmihn://persona", "text": "{}"}
 
@@ -379,7 +366,6 @@ class MCPServer:
         }
 
     def _get_stats(self) -> Dict:
-
         stats = {}
         if self.memory:
             stats["memory"] = self.memory.get_stats()
@@ -418,7 +404,6 @@ class MCPServer:
         return "\n\n".join(results) if results else "No results"
 
     def _tool_remember(self, content: str, type: str = "fact", importance: float = 0.7) -> str:
-
         if not self.memory or not self.memory.long_term:
             return "Memory not available"
 
@@ -432,7 +417,6 @@ class MCPServer:
         return f"Saved to long-term memory (ID: {doc_id})"
 
     async def _tool_query_graph(self, query: str, max_depth: int = 2) -> str:
-
         if not self.graph:
             return "Graph RAG not available"
 
@@ -440,7 +424,6 @@ class MCPServer:
         return result.context if result.context else "No graph results"
 
     def _generate_prompt_messages(self, prompt_name: str, arguments: Dict) -> List[Dict]:
-
         if prompt_name == "axnmihn_style":
             return [{
                 "role": "user",

@@ -213,6 +213,21 @@ class TestStripXmlTags:
         assert "<thinking" not in result
         assert "thought" in result
 
+    # -- Tool block removal preserves spacing --------------------------------
+
+    def test_tool_block_removal_inserts_space_between_korean(self):
+        """Tool block between Korean text should leave a space."""
+        text = "백엔드에서<tool_call>do_something()</tool_call>특수문자"
+        result = strip_xml_tags(text)
+        assert "백엔드에서" in result
+        assert "특수문자" in result
+        assert "백엔드에서특수문자" not in result  # should NOT be glued
+
+    def test_tool_block_removal_inserts_space_between_text(self):
+        text = "한글텍스트<function_call>call()</function_call>이어지는텍스트"
+        result = strip_xml_tags(text)
+        assert "한글텍스트이어지는텍스트" not in result  # should NOT be glued
+
 
 # ---------------------------------------------------------------------------
 # has_partial_tool_tag

@@ -21,7 +21,6 @@ _TURN_SPLIT_RE = re.compile(
 
 @dataclass
 class SectionBudget:
-
     name: str
     max_chars: int
     priority: int
@@ -98,9 +97,7 @@ TIER_BUDGETS: Dict[str, Dict[str, SectionBudget]] = {
 }
 
 class ContextOptimizer:
-
     def __init__(self, tier: str = "axel"):
-
         self.tier = tier if tier in TIER_BUDGETS else "axel"
         self.budgets = TIER_BUDGETS[self.tier]
         self.sections: Dict[str, str] = {}
@@ -114,7 +111,6 @@ class ContextOptimizer:
         }
 
     def add_section(self, name: str, content: str) -> None:
-
         if not content or not content.strip():
             return
 
@@ -133,7 +129,6 @@ class ContextOptimizer:
             self._stats["total_chars_final"] += len(processed_content)
 
     def _apply_budget(self, content: str, budget: SectionBudget) -> str:
-
         if budget.max_chars <= 0:
             self._stats["sections_dropped"] += 1
             return ""
@@ -166,7 +161,6 @@ class ContextOptimizer:
         return truncate_text(content, max_chars)
 
     def _summarize_overflow(self, content: str, max_chars: int) -> str:
-
         recent_budget = int(max_chars * 0.85)
         summary_budget = max_chars - recent_budget
 
@@ -212,7 +206,6 @@ class ContextOptimizer:
         return [t.strip() for t in turns if t.strip()]
 
     def build(self) -> str:
-
         if not self.sections:
             return ""
 
@@ -254,7 +247,6 @@ class ContextOptimizer:
         return result
 
     def format_as_bullets(self, items: List[str], max_items: int = 10) -> str:
-
         if not items:
             return ""
 
@@ -276,11 +268,9 @@ class ContextOptimizer:
         return "\n".join(formatted)
 
     def get_stats(self) -> Dict:
-
         return self._stats.copy()
 
 def get_dynamic_system_prompt(tier: str, full_prompt: str) -> str:
-
     budget = TIER_BUDGETS.get(tier, TIER_BUDGETS["axel"]).get("system_prompt")
     if budget and len(full_prompt) > budget.max_chars:
         return full_prompt[:budget.max_chars - 20] + "\n... (truncated)"

@@ -31,6 +31,7 @@ class ContextBuilderMixin:
             Formatted context string with time, working, long-term, and graph data
         """
         t0 = time.monotonic()
+        self._current_channel_id = channel_id
         result = await self._build_smart_context_async(current_query)
         dur_ms = int((time.monotonic() - t0) * 1000)
         _log.info("Context build done", sources=result.count("##"), dur_ms=dur_ms)
@@ -60,6 +61,7 @@ class ContextBuilderMixin:
             Formatted context string
         """
         t0 = time.monotonic()
+        self._current_channel_id = channel_id
         try:
             asyncio.get_running_loop()
             result = self._build_smart_context_sync(current_query)
@@ -105,6 +107,18 @@ class ContextBuilderMixin:
                         score_str = f"[{mem.score:.2f}]" if mem.score else ""
                         memory_lines.append(f"- {score_str} {mem.content[:200]}...")
                     context_parts.append(f"## 관련 장기 기억 ({len(selected_memories)}개, {tokens_used} tokens)\n" + "\n".join(memory_lines))
+
+                    # W1-1: Record M3 access patterns in M5 Meta Memory
+                    if hasattr(self, "meta_memory") and self.meta_memory:
+                        try:
+                            self.meta_memory.record_access(
+                                query_text=current_query,
+                                matched_memory_ids=[m.id for m in selected_memories],
+                                relevance_scores=[m.score for m in selected_memories if m.score],
+                                channel_id=getattr(self, "_current_channel_id", "default"),
+                            )
+                        except Exception as e:
+                            _log.debug("M5 record_access failed (sync)", error=str(e))
             except Exception as e:
                 _log.warning("MemGPT selection failed (sync)", error=str(e))
 
@@ -218,15 +232,29 @@ class ContextBuilderMixin:
             from ..temporal import parse_temporal_query
             temporal_filter = parse_temporal_query(current_query)
 
-            # Parallel fetch of all three sources
-            results = await asyncio.gather(
-                self._fetch_long_term(current_query, temporal_filter),
+            # W3-1: GraphRAG first, then enrich M3 query with entities
+            try:
+                gr_result = await self._fetch_graph_rag(current_query)
+            except Exception as e:
+                gr_result = e
+                _log.debug("GraphRAG fetch failed", error=str(e))
+
+            enriched_query = current_query
+            if (
+                not isinstance(gr_result, BaseException)
+                and gr_result
+                and hasattr(gr_result, "entities")
+                and gr_result.entities
+            ):
+                entity_names = " ".join(e.name for e in gr_result.entities[:3])
+                enriched_query = f"{current_query} {entity_names}"
+
+            # Parallel fetch: M3 (enriched) + M2 (session archive)
+            lt_result, sa_result = await asyncio.gather(
+                self._fetch_long_term(enriched_query, temporal_filter),
                 self._fetch_session_archive(current_query, temporal_filter),
-                self._fetch_graph_rag(current_query),
                 return_exceptions=True,
             )
-
-            lt_result, sa_result, gr_result = results
 
             # Long-term memories
             if not isinstance(lt_result, BaseException) and lt_result:
@@ -240,6 +268,18 @@ class ContextBuilderMixin:
                         f"## 관련 장기 기억 ({len(selected_memories)}개, {tokens_used} tokens)\n"
                         + "\n".join(memory_lines)
                     )
+
+                    # W1-1: Record M3 access patterns in M5 Meta Memory
+                    if hasattr(self, "meta_memory") and self.meta_memory:
+                        try:
+                            self.meta_memory.record_access(
+                                query_text=current_query,
+                                matched_memory_ids=[m.id for m in selected_memories],
+                                relevance_scores=[m.score for m in selected_memories if m.score],
+                                channel_id=getattr(self, "_current_channel_id", "default"),
+                            )
+                        except Exception as e:
+                            _log.debug("M5 record_access failed", error=str(e))
             elif isinstance(lt_result, BaseException):
                 _log.warning("MemGPT selection failed (async)", error=str(lt_result))
 
@@ -255,6 +295,24 @@ class ContextBuilderMixin:
                 context_parts.append(f"## 관계 기반 지식\n{gr_result.context}")
             elif isinstance(gr_result, BaseException):
                 _log.debug("GraphRAG query skipped (async)", error=str(gr_result))
+
+        # M0: Event buffer context (recent events)
+        recent_events = self.event_buffer.get_recent(5)
+        if recent_events:
+            event_lines = [
+                f"- [{e.type.value}] {e.timestamp.strftime('%H:%M')}"
+                for e in recent_events
+            ]
+            context_parts.append(f"## 이벤트 버퍼 (최근 {len(recent_events)}개)\n" + "\n".join(event_lines))
+
+        # M5: Meta memory context (hot memories)
+        hot_memories = self.meta_memory.get_hot_memories(limit=5)
+        if hot_memories:
+            hot_lines = [
+                f"- {hm['memory_id'][:8]}... (접근 {hm['access_count']}회, 채널 {hm['channel_diversity']}개)"
+                for hm in hot_memories
+            ]
+            context_parts.append(f"## 메타 메모리 (핫 {len(hot_memories)}개)\n" + "\n".join(hot_lines))
 
         context_text = "\n\n".join(context_parts)
         context_text = truncate_text(context_text, self.MAX_CONTEXT_TOKENS * 4)

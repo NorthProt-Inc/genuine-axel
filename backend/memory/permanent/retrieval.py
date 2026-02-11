@@ -22,6 +22,7 @@ class MemoryRetriever:
         repository: MemoryRepositoryProtocol,
         embedding_service: EmbeddingService,
         decay_calculator: DecayCalculatorProtocol,
+        meta_memory=None,
     ):
         """Initialize memory retriever.
         
@@ -29,10 +30,12 @@ class MemoryRetriever:
             repository: Repository for querying memories
             embedding_service: Service for generating embeddings
             decay_calculator: Calculator for memory decay
+            meta_memory: Optional MetaMemory for hot memory boosting
         """
         self._repository = repository
         self._embedding_service = embedding_service
         self._decay_calculator = decay_calculator
+        self._meta_memory = meta_memory
 
     def find_similar_memories(
         self,
@@ -181,6 +184,15 @@ class MemoryRetriever:
 
             from backend.memory.temporal import boost_temporal_score
 
+            # W3-1: Get hot memory IDs for score boost
+            hot_memory_ids: set[str] = set()
+            if self._meta_memory:
+                try:
+                    hot_list = self._meta_memory.get_hot_memories(limit=20)
+                    hot_memory_ids = {h["memory_id"] for h in hot_list}
+                except Exception:
+                    pass
+
             memories = []
             for item in results:
                 doc_id = item["id"]
@@ -200,6 +212,11 @@ class MemoryRetriever:
                 )
                 semantic_score = base_relevance * decay_factor
 
+                # W6-1: Apply importance weight (0.5-1.0 range)
+                raw_importance = metadata.get("importance", 0.5)
+                importance_weight = 0.5 + 0.5 * max(0.0, min(1.0, raw_importance))
+                semantic_score *= importance_weight
+
                 # Apply temporal boost
                 if temporal_filter:
                     effective_score = boost_temporal_score(
@@ -210,6 +227,11 @@ class MemoryRetriever:
                     )
                 else:
                     effective_score = semantic_score
+
+                # W3-1: Hot memory boost
+                is_hot = doc_id in hot_memory_ids
+                if is_hot:
+                    effective_score += 0.1
 
                 # Track access
                 if access_callback:
@@ -223,6 +245,7 @@ class MemoryRetriever:
                         "relevance": base_relevance,
                         "effective_score": effective_score,
                         "decay_factor": decay_factor,
+                        "importance_weight": importance_weight,
                         "temporal_boosted": temporal_filter is not None,
                     }
                 )

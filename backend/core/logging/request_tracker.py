@@ -11,7 +11,6 @@ _current_request: ContextVar[Optional['RequestTracker']] = ContextVar('current_r
 
 @dataclass
 class RequestTracker:
-
     request_id: str = field(default_factory=lambda: str(uuid.uuid4())[:6])
     input_preview: str = ""
     start_time: float = field(default_factory=time.time)
@@ -41,7 +40,6 @@ class RequestTracker:
         return (time.time() - self.start_time) * 1000
 
 def start_request(user_input: str) -> RequestTracker:
-
     preview = user_input[:30] + "..." if len(user_input) > 30 else user_input
     preview = preview.replace("\n", " ")
 
@@ -50,11 +48,9 @@ def start_request(user_input: str) -> RequestTracker:
     return tracker
 
 def get_tracker() -> Optional[RequestTracker]:
-
     return _current_request.get()
 
 def log_gateway(intent: str, model: str, elapsed_ms: float):
-
     tracker = get_tracker()
     if tracker:
         tracker.gateway_intent = intent
@@ -62,7 +58,6 @@ def log_gateway(intent: str, model: str, elapsed_ms: float):
         tracker.gateway_ms = elapsed_ms
 
 def log_memory(longterm: int = 0, working: int = 0, tokens: int = 0):
-
     tracker = get_tracker()
     if tracker:
         tracker.memory_longterm = longterm
@@ -70,7 +65,6 @@ def log_memory(longterm: int = 0, working: int = 0, tokens: int = 0):
         tracker.memory_tokens = tokens
 
 def log_search(query: str, results: int, elapsed_ms: float):
-
     tracker = get_tracker()
     if tracker:
         tracker.search_query = query
@@ -78,7 +72,6 @@ def log_search(query: str, results: int, elapsed_ms: float):
         tracker.search_ms = elapsed_ms
 
 def end_request():
-
     tracker = get_tracker()
     if not tracker:
         return

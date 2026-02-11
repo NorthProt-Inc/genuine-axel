@@ -158,13 +158,19 @@ class PathSecurityManager:
         # 5. Symlink check — original is a symlink whose target must land
         #    inside allowed dirs for this access_type
         raw_p = Path(raw_path)
-        if raw_p.is_symlink():
-            target = raw_p.resolve()
-            if not self._is_within_allowed(target, access_type):
-                return PathValidationResult(
-                    valid=False,
-                    error=f"Symlink target outside allowed directories: {target}",
-                )
+        try:
+            if raw_p.is_symlink():
+                target = raw_p.resolve()
+                if not self._is_within_allowed(target, access_type):
+                    return PathValidationResult(
+                        valid=False,
+                        error=f"Symlink target outside allowed directories: {target}",
+                    )
+        except PermissionError:
+            return PathValidationResult(
+                valid=False,
+                error=f"Permission denied accessing path: {raw_path}",
+            )
 
         # 6. Forbidden patterns
         path_str_lower = str(path).lower()

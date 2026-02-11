@@ -86,6 +86,49 @@ class TestCallTool:
                 assert result["success"] is False
                 assert "retries" in result["error"]
 
+    async def test_error_text_returns_success_false(self, client):
+        """When tool returns 'Error: ...' text, success should be False."""
+        mock_result = [_make_text_content("Error: Permission denied: '/root/axnmihn/README.md'")]
+
+        async def run_direct(func, **kwargs):
+            return await func()
+
+        with patch("backend.core.mcp_client.retry_async", side_effect=run_direct):
+            with patch("backend.core.mcp_server.call_tool", new_callable=AsyncMock,
+                       return_value=mock_result, create=True):
+                result = await client.call_tool("read_file", {"path": "/root/axnmihn/README.md"})
+                assert result["success"] is False
+                assert "Error:" in result["result"]
+
+    async def test_normal_text_returns_success_true(self, client):
+        """When tool returns normal text, success should be True."""
+        mock_result = [_make_text_content("File content here")]
+
+        async def run_direct(func, **kwargs):
+            return await func()
+
+        with patch("backend.core.mcp_client.retry_async", side_effect=run_direct):
+            with patch("backend.core.mcp_server.call_tool", new_callable=AsyncMock,
+                       return_value=mock_result, create=True):
+                result = await client.call_tool("read_file", {"path": "/home/user/file.txt"})
+                assert result["success"] is True
+
+    async def test_multiple_texts_with_one_error(self, client):
+        """When any text starts with 'Error:', success should be False."""
+        mock_result = [
+            _make_text_content("Some normal text"),
+            _make_text_content("Error: Something failed"),
+        ]
+
+        async def run_direct(func, **kwargs):
+            return await func()
+
+        with patch("backend.core.mcp_client.retry_async", side_effect=run_direct):
+            with patch("backend.core.mcp_server.call_tool", new_callable=AsyncMock,
+                       return_value=mock_result, create=True):
+                result = await client.call_tool("test_tool")
+                assert result["success"] is False
+
     async def test_default_arguments_is_empty_dict(self, client):
         """When arguments=None, should default to {}."""
         with patch("backend.core.mcp_client.retry_async", new_callable=AsyncMock) as mock_retry:

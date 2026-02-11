@@ -15,7 +15,6 @@ from .constants import (
 
 
 class SmartFormatter(logging.Formatter):
-
     HIGHLIGHT_KEYS = {
         "model": "MODEL",
         "tier": "MODEL",
@@ -35,13 +34,11 @@ class SmartFormatter(logging.Formatter):
         self.compact = compact
 
     def _c(self, key: str) -> str:
-
         if not self.use_colors:
             return ""
         return _COLORS.get(key, "")
 
     def _format_value(self, value: Any, max_len: int = 60) -> str:
-
         if value is None:
             return "null"
 
@@ -69,16 +66,14 @@ class SmartFormatter(logging.Formatter):
         return s
 
     def _get_module_color(self, name: str) -> str:
-
         if not self.use_colors:
             return ""
 
-        prefix = name.split(".")[0].lower()
+        prefix = name.split(".")[0].split("-")[0].lower()
         return MODULE_COLORS.get(prefix, _COLORS.get("MODULE", ""))
 
     def _get_module_abbrev(self, name: str) -> str:
-
-        prefix = name.split(".")[0].lower()
+        prefix = name.split(".")[0].split("-")[0].lower()
         return MODULE_ABBREV.get(prefix, prefix[:3].upper())
 
     def format(self, record: logging.LogRecord) -> str:
@@ -157,11 +152,9 @@ class SmartFormatter(logging.Formatter):
 
 
 class PlainFormatter(logging.Formatter):
-
     def _get_module_display(self, name: str) -> str:
-
         name_parts = name.split(".")
-        prefix = name_parts[0].lower()
+        prefix = name_parts[0].split("-")[0].lower()
         mod_abbrev = MODULE_ABBREV.get(prefix, prefix[:3].upper())
 
         if len(name_parts) > 1:
@@ -205,7 +198,6 @@ class PlainFormatter(logging.Formatter):
 
 
 class JsonFormatter(logging.Formatter):
-
     def format(self, record: logging.LogRecord) -> str:
         now = datetime.now(VANCOUVER_TZ).isoformat()
         payload = {

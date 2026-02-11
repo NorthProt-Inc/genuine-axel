@@ -74,10 +74,10 @@ class TestParseImportance:
         assert _parse_importance("0.15") == 0.15
 
     def test_empty_string_returns_default(self):
-        assert _parse_importance("") == 0.7
+        assert _parse_importance("") == 0.5
 
     def test_no_match_returns_default(self):
-        assert _parse_importance("no number here") == 0.7
+        assert _parse_importance("no number here") == 0.5
 
     def test_whitespace_handling(self):
         assert _parse_importance("  0.65  ") == 0.65
@@ -123,7 +123,7 @@ class TestCalculateImportanceAsync:
         ):
             score = await calculate_importance_async("test", "test")
 
-        assert score == 0.7
+        assert score == 0.5
 
     async def test_general_error_returns_default(self):
         with patch(
@@ -133,7 +133,7 @@ class TestCalculateImportanceAsync:
         ):
             score = await calculate_importance_async("test", "test")
 
-        assert score == 0.7
+        assert score == 0.5
 
     async def test_empty_response_returns_default(self):
         mock_response = MagicMock()
@@ -146,7 +146,7 @@ class TestCalculateImportanceAsync:
         ):
             score = await calculate_importance_async("test", "test")
 
-        assert score == 0.7
+        assert score == 0.5
 
     async def test_persona_context_passed(self):
         mock_response = MagicMock()
@@ -209,7 +209,7 @@ class TestCalculateImportanceSync:
         ):
             score = calculate_importance_sync("test", "test")
 
-        assert score == 0.7
+        assert score == 0.5
 
     def test_general_error_returns_default(self):
         mock_client = MagicMock()
@@ -224,7 +224,7 @@ class TestCalculateImportanceSync:
         ):
             score = calculate_importance_sync("test", "test")
 
-        assert score == 0.7
+        assert score == 0.5
 
     def test_empty_response_returns_default(self):
         mock_client = MagicMock()
@@ -241,7 +241,7 @@ class TestCalculateImportanceSync:
         ):
             score = calculate_importance_sync("test", "test")
 
-        assert score == 0.7
+        assert score == 0.5
 
     def test_with_persona_context(self):
         mock_client = MagicMock()

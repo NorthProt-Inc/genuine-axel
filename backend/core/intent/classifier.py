@@ -10,7 +10,6 @@ _log = get_logger("core.intent")
 
 class IntentType(str, Enum):
     CHAT = "chat"
-    SEARCH = "search"
     TOOL_USE = "tool_use"
     MEMORY_QUERY = "memory_query"
     COMMAND = "command"
@@ -56,13 +55,6 @@ KEYWORD_MAP: dict[str, dict] = {
             "file", "search", "lookup", "open", "browse",
         ],
         "confidence": 0.55,
-    },
-    "search": {
-        "keywords": [
-            "?", "뭐", "어떻게", "왜", "언제", "어디", "누가",
-            "what", "how", "why", "when", "where", "who",
-        ],
-        "confidence": 0.6,
     },
 }
 

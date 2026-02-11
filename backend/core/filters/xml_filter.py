@@ -118,13 +118,17 @@ def strip_xml_tags(text: str) -> str:
         return text
 
     # First, remove complete tool call blocks entirely (these are leaked tool calls)
-    cleaned = _TOOL_BLOCK_PATTERN.sub('', text)
+    # Insert a space to prevent adjacent text from gluing together
+    cleaned = _TOOL_BLOCK_PATTERN.sub(' ', text)
 
     # Then remove individual XML tags, keeping the content between them
     cleaned = _XML_TAG_PATTERN.sub('', cleaned)
 
     # Clean up excessive blank lines left behind
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+
+    # Collapse multiple spaces (from tag removal) into one
+    cleaned = re.sub(r' {2,}', ' ', cleaned)
 
     return cleaned.strip('\n')
 

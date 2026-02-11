@@ -118,13 +118,15 @@ class AdaptiveDecayCalculator:
     - Recency paradox (old memory recently accessed gets boost)
     """
 
-    def __init__(self, config: Optional[MemoryConfig] = None):
+    def __init__(self, config: Optional[MemoryConfig] = None, peak_hours: Optional[List[int]] = None):
         """Initialize calculator.
 
         Args:
             config: Optional MemoryConfig override
+            peak_hours: Optional peak activity hours (0-23) for circadian stability
         """
         self.config = config or MemoryConfig
+        self.peak_hours = peak_hours or []
 
     def calculate(
         self,
@@ -156,8 +158,21 @@ class AdaptiveDecayCalculator:
         try:
             hours_passed = get_memory_age_hours(created_at)
 
+            # W2-2: Apply circadian stability to access count
+            effective_access_count = access_count
+            if self.peak_hours and last_accessed:
+                from .dynamic_decay import apply_circadian_stability
+                try:
+                    last_dt = datetime.fromisoformat(last_accessed.replace("Z", "+00:00"))
+                    last_hour = last_dt.hour
+                    effective_access_count = apply_circadian_stability(
+                        access_count, last_hour, self.peak_hours
+                    )
+                except Exception:
+                    pass
+
             # Stability from access count (more access = slower decay)
-            stability = 1 + self.config.ACCESS_STABILITY_K * math.log(1 + access_count)
+            stability = 1 + self.config.ACCESS_STABILITY_K * math.log(1 + effective_access_count)
 
             # Resistance from connections (more connections = slower decay)
             resistance = min(1.0, connection_count * self.config.RELATION_RESISTANCE_K)
@@ -232,12 +247,22 @@ class AdaptiveDecayCalculator:
             last_accessed = mem.get("last_accessed")
             last_access_hours = get_memory_age_hours(last_accessed) if last_accessed else -1.0
 
+            # W2-2: Extract hour-of-day for circadian stability
+            last_accessed_hour = -1
+            if last_accessed:
+                try:
+                    la_dt = datetime.fromisoformat(last_accessed.replace("Z", "+00:00"))
+                    last_accessed_hour = la_dt.hour
+                except Exception:
+                    pass
+
             processed.append({
                 "importance": float(mem.get("importance", 0.5)),
                 "hours_passed": hours_passed,
                 "access_count": int(mem.get("access_count", 0)),
                 "connection_count": int(mem.get("connection_count", 0)),
                 "last_access_hours": last_access_hours,
+                "last_accessed_hour": last_accessed_hour,
                 "memory_type": type_to_int.get(mem.get("memory_type") or "", 0),
                 "channel_mentions": int(mem.get("channel_mentions", 0)),
             })
@@ -314,14 +339,23 @@ class AdaptiveDecayCalculator:
 
     def _calculate_batch_python(self, processed: List[Optional[dict]]) -> List[float]:
         """Batch calculation using Python (fallback)."""
+        from .dynamic_decay import apply_circadian_stability
+
         results = []
         for p in processed:
             if p is None:
                 results.append(0.5)
                 continue
 
+            # W2-2: Apply circadian stability to access count
+            access_count = p["access_count"]
+            if self.peak_hours and p.get("last_accessed_hour", -1) >= 0:
+                access_count = apply_circadian_stability(
+                    access_count, p["last_accessed_hour"], self.peak_hours
+                )
+
             # Stability from access count
-            stability = 1 + self.config.ACCESS_STABILITY_K * math.log(1 + p["access_count"])
+            stability = 1 + self.config.ACCESS_STABILITY_K * math.log(1 + access_count)
 
             # Resistance from connections
             resistance = min(1.0, p["connection_count"] * self.config.RELATION_RESISTANCE_K)

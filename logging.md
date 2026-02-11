@@ -30,6 +30,13 @@ This logging system provides clean and readable log output:
 | media | MED | Orange | `\033[38;5;208m` |
 | wake | WAK | Light Red | `\033[91m` |
 | tools | TOL | White | `\033[97m` |
+| research | RSC | Blue | `\033[38;5;39m` |
+| services | SVC | Light Purple | `\033[38;5;147m` |
+| app | APP | Cyan | `\033[96m` |
+| config | CFG | Cyan | `\033[96m` |
+| opus | OPU | Pink | `\033[38;5;213m` |
+| tracker | TRK | Gray | `\033[90m` |
+| utils | UTL | Light Gray | `\033[37m` |
 
 ---
 
@@ -242,6 +249,20 @@ async def important_operation(config: dict):
 14:32:01.567 ERROR [COR|chat_hand…] ✗ my_function │ error=Connection refused
 ```
 
+### Logger Naming Convention
+
+Logger names follow the `module.submodule` pattern. The first segment (before `.` or `-`) determines the module color and abbreviation:
+
+```python
+# Standard naming — first segment maps to MODULE_COLORS/MODULE_ABBREV
+_log = get_logger("services.context")    # SVC (Light Purple)
+_log = get_logger("research.browser")    # RSC (Blue)
+
+# Hyphenated names — prefix before first '-' is used for mapping
+_log = get_logger("opus-bridge")         # OPU (Pink)
+_log = get_logger("rate-limiter")        # RAT (default)
+```
+
 ---
 
 ## Configuration
@@ -293,7 +314,7 @@ HH:MM:SS.mmm LVL [MOD|submod     ] msg │ k=v k2=v2
 |-----------|-------------|---------|
 | `HH:MM:SS.mmm` | Timestamp (with milliseconds) | `14:32:01.234` |
 | `LVL` | Severity level (5 chars) | `DEBUG`, ` INFO`, ` WARN`, `ERROR`, `CRIT!` |
-| `MOD` | Module abbreviation (3 chars) | `API`, `COR`, `MEM` |
+| `MOD` | Module abbreviation (3 chars) | `API`, `COR`, `MEM`, `RSC`, `SVC` |
 | `submod` | Submodule name (max 9 chars) | `chat`, `handler` |
 | `msg` | Log message | `Server started` |
 | `│` | Separator | - |
@@ -307,11 +328,14 @@ HH:MM:SS.mmm LVL [MOD|submod     ] msg │ k=v k2=v2
 14:32:02.123  INFO [LLM|clients    ] Response done │ tok=1234 lat=667ms
 14:32:02.234  WARN [MEM|permanent  ] Cache miss │ key=user_pref
 14:32:02.345 ERROR [API|chat       ] Request fail │ err=timeout
+14:32:03.100  INFO [SVC|context    ] Context built │ tok=4500 layers=3
+14:32:03.200 DEBUG [RSC|browser    ] Page fetched │ url=https://example.com
+14:32:03.300  INFO [OPU|bridge     ] Task delegated │ model=opus
 ```
 
 ### File Log Format
 
-File logs use a more detailed timestamp without colors:
+File logs are written to `logs/axnmihn.log` with a detailed timestamp and no colors:
 
 ```
 2026-02-10 14:32:01.234 INFO    [abc12345│api.chat      ] Chat req recv │ sess=abc12345 mdl=gemini-3
@@ -400,16 +424,18 @@ backend/
         └── request_tracker.py    # Request tracking (기존)
 
 logs/
-├── backend.log           # Backend plain text log (rotated, 10MB, 5 backups)
+├── axnmihn.log           # Structured logger output (rotated, 10MB, 5 backups)
+├── backend.log           # Backend plain text log (systemd stdout)
 ├── backend_error.log     # Backend errors only
 ├── mcp.log               # MCP server log
 ├── mcp_error.log         # MCP errors only
 ├── research.log          # Research MCP log
 ├── research_error.log    # Research errors only
-├── tts.log               # TTS service log
-├── tts_error.log         # TTS errors only
+├── context7_mcp.log      # Context7 MCP log
+├── context7_mcp_error.log # Context7 MCP errors only
+├── markitdown_mcp.log    # MarkItDown MCP log
+├── markitdown_mcp_error.log # MarkItDown MCP errors only
 ├── wakeword.log          # Wakeword service log
-├── wakeword_error.log    # Wakeword errors only
 └── night_ops.log         # Night shift automation log
 ```
 
@@ -514,6 +540,7 @@ except Exception as e:
 
 ## Changelog
 
+- **v3.1**: 모듈 매핑 확장 — `research`, `services`, `app`, `config`, `opus`, `tracker`, `utils` 색상/약어 추가, 하이픈 로거 이름 지원, 로그 파일 구조 문서 동기화
 - **v3.0**: 모듈화 — 549줄 단일 파일을 4개 모듈로 분리 (`constants.py`, `formatters.py`, `structured_logger.py`, `decorator.py`)
 - **v2.0**: Added module colors, abbreviation system, @logged decorator
 - **v1.0**: Initial structured logging system

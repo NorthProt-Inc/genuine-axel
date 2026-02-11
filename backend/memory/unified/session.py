@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.core.logging import get_logger
 from backend.config import CHROMADB_PATH
+from backend.memory.permanent.importance import calculate_importance_async
 
 from ..current import TimestampedMessage
 from ..permanent import LegacyMemoryMigrator
@@ -76,36 +77,76 @@ class SessionMixin:
 
         if summary_result:
 
-            self.session_archive.save_session(
-                session_id=session_id,
-                summary=summary_result.get("summary", "요약 없음"),
-                key_topics=summary_result.get("key_topics", []),
-                emotional_tone=summary_result.get("emotional_tone", "neutral"),
-                turn_count=len(messages) // 2,
-                started_at=messages[0].timestamp if messages else datetime.now(),
-                ended_at=messages[-1].timestamp if messages else datetime.now(),
-                messages=[m.to_dict() for m in messages]
-            )
+            try:
+                self.session_archive.save_session(
+                    session_id=session_id,
+                    summary=summary_result.get("summary", "요약 없음"),
+                    key_topics=summary_result.get("key_topics", []),
+                    emotional_tone=summary_result.get("emotional_tone", "neutral"),
+                    turn_count=len(messages) // 2,
+                    started_at=messages[0].timestamp if messages else datetime.now(),
+                    ended_at=messages[-1].timestamp if messages else datetime.now(),
+                    messages=[m.to_dict() for m in messages]
+                )
+            except Exception as e:
+                _log.warning("Session archive save failed (shutdown race)", error=str(e)[:120])
 
             # PERF-028: Batch fact and insight storage
             facts = summary_result.get("facts_discovered", [])
             insights = summary_result.get("insights_discovered", [])
 
-            for fact in facts:
-                self.long_term.add(
-                    content=fact,
-                    memory_type="fact",
-                    importance=0.7,
-                    source_session=session_id
-                )
+            # W1-1: Calculate LLM importance for facts/insights
+            fact_importances = await asyncio.gather(
+                *(
+                    calculate_importance_async(fact, "", "")
+                    for fact in facts
+                ),
+            )
+            insight_importances = await asyncio.gather(
+                *(
+                    calculate_importance_async(insight, "", "")
+                    for insight in insights
+                ),
+            )
 
-            for insight in insights:
-                self.long_term.add(
-                    content=insight,
-                    memory_type="insight",
-                    importance=0.6,
-                    source_session=session_id
-                )
+            for fact, importance in zip(facts, fact_importances):
+                try:
+                    self.long_term.add(
+                        content=fact,
+                        memory_type="fact",
+                        importance=importance,
+                        source_session=session_id
+                    )
+                except Exception:
+                    _log.debug("Fact store skipped (connection closed)")
+                    break
+
+            for insight, importance in zip(insights, insight_importances):
+                try:
+                    self.long_term.add(
+                        content=insight,
+                        memory_type="insight",
+                        importance=importance,
+                        source_session=session_id
+                    )
+                except Exception:
+                    _log.debug("Insight store skipped (connection closed)")
+                    break
+
+            # W5-1: Auto-promote session conversations with high importance to M3
+            all_importances = list(fact_importances) + list(insight_importances)
+            max_importance = max(all_importances) if all_importances else 0.0
+            if max_importance >= 0.6 and messages:
+                conversation_text = summary_result.get("summary", "")
+                try:
+                    self.long_term.add(
+                        content=conversation_text,
+                        memory_type="conversation",
+                        importance=max_importance,
+                        source_session=session_id,
+                    )
+                except Exception:
+                    _log.debug("Conversation promotion skipped (connection closed)")
 
         # M0: Push session_end event and clear buffer
         self.event_buffer.push(StreamEvent(

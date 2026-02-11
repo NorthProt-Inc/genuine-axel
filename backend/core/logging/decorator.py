@@ -14,9 +14,7 @@ def logged(
     log_args: bool = False,
     log_result: bool = False,
 ):
-
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
-
         module = func.__module__
         if module.startswith("backend."):
             module = module[8:]

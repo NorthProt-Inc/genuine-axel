@@ -15,13 +15,11 @@ _log = get_logger("error_monitor")
 
 @dataclass
 class ErrorCounter:
-
     count: int = 0
     first_seen: float = 0.0
     last_seen: float = 0.0
 
 class ErrorMonitor:
-
     WINDOW_SECONDS = 300
     THRESHOLDS = {
         "503": 3,
@@ -51,7 +49,6 @@ class ErrorMonitor:
             self._session = None
 
     def record(self, error_type: str, details: str = "") -> None:
-
         now = time.time()
 
         if error_type not in self._counters:
@@ -76,7 +73,6 @@ class ErrorMonitor:
             self._trigger_alert(error_type, counter, details)
 
     def _trigger_alert(self, error_type: str, counter: ErrorCounter, details: str) -> None:
-
         now = time.time()
         last = self._last_alert.get(error_type, 0)
 
@@ -102,7 +98,6 @@ class ErrorMonitor:
                 _log.debug("Discord alert skipped (no event loop)")
 
     async def _send_discord_alert(self, error_type: str, counter: ErrorCounter, details: str) -> None:
-
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             message = {
@@ -130,7 +125,6 @@ class ErrorMonitor:
             _log.error("Discord alert error", error=str(e))
 
     def get_stats(self) -> Dict[str, Dict]:
-
         now = time.time()
         stats = {}
         for error_type, counter in self._counters.items():

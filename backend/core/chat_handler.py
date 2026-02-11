@@ -3,9 +3,8 @@ ChatHandler - Thin orchestrator for chat processing.
 
 This module coordinates the chat flow using specialized services:
 - ContextService: Builds context from 4-tier memory
-- SearchService: Handles web search
 - ToolExecutionService: Executes MCP tools
-- ReActLoopService: Runs the ReAct reasoning loop
+- ReActLoopService: Runs the ReAct reasoning loop (LLM decides tool use including search)
 - MemoryPersistenceService: Persists conversation to memory
 
 Refactored from 938 lines to ~200 lines using service layer pattern.
@@ -19,7 +18,6 @@ from backend.core.filters import strip_xml_tags
 from backend.core.logging import get_logger, request_tracker as rt
 from backend.core.services import (
     ContextService,
-    SearchService,
     ToolExecutionService,
     MemoryPersistenceService,
     ClassificationResult,
@@ -72,16 +70,14 @@ class ChatHandler:
     Coordinates services to handle chat requests:
     1. Add user message to memory
     2. Build context from memory systems
-    3. Optionally perform web search
-    4. Execute ReAct loop with tools
-    5. Persist conversation to memory
+    3. Execute ReAct loop with tools (LLM decides search via MCP tools)
+    4. Persist conversation to memory
     """
 
     def __init__(
         self,
         state: 'ChatStateProtocol',
         context_service: Optional[ContextService] = None,
-        search_service: Optional[SearchService] = None,
         tool_service: Optional[ToolExecutionService] = None,
         react_service: Optional[ReActLoopService] = None,
         persistence_service: Optional[MemoryPersistenceService] = None
@@ -91,7 +87,6 @@ class ChatHandler:
         Args:
             state: Application state implementing ChatStateProtocol
             context_service: Service for building context (optional, created if None)
-            search_service: Service for web search (optional, created if None)
             tool_service: Service for tool execution (optional, created if None)
             react_service: Service for ReAct loop (optional, created if None)
             persistence_service: Service for memory persistence (optional, created if None)
@@ -100,7 +95,6 @@ class ChatHandler:
 
         # Initialize services with lazy creation
         self._context_service = context_service
-        self._search_service = search_service
         self._tool_service = tool_service
         self._react_service = react_service
         self._persistence_service = persistence_service
@@ -115,13 +109,6 @@ class ChatHandler:
                 identity_manager=self.state.identity_manager
             )
         return self._context_service
-
-    @property
-    def search_service(self) -> SearchService:
-        """Lazy initialization of search service."""
-        if self._search_service is None:
-            self._search_service = SearchService()
-        return self._search_service
 
     @property
     def tool_service(self) -> ToolExecutionService:
@@ -196,7 +183,6 @@ class ChatHandler:
         # Intent-based classification
         intent_result = classify_keyword(user_input)
         classification = ClassificationResult(
-            needs_search=intent_result.intent == "search",
             needs_tools=intent_result.intent in ("tool_use", "command"),
         )
         rt.log_gateway(intent="chat", model="default", elapsed_ms=(time.perf_counter() - start_time) * 1000)
@@ -220,16 +206,12 @@ class ChatHandler:
                 model_config=model_config,
                 classification=classification,
             ),
-            self.search_service.search_if_needed(
-                user_input,
-                request.enable_search or classification.needs_search,
-            ),
             self._fetch_tools(),
             return_exceptions=True,
         )
 
         # Unpack with fallbacks for individual failures
-        raw_emotion, raw_context, raw_search, raw_tools = gather_results
+        raw_emotion, raw_context, raw_tools = gather_results
 
         from backend.core.services.context_service import ContextResult
 
@@ -244,14 +226,6 @@ class ChatHandler:
         if isinstance(raw_context, BaseException):
             _log.warning("PARALLEL context fail", error=str(raw_context))
 
-        from backend.core.services.search_service import SearchResult
-        search_result: SearchResult = (
-            raw_search if isinstance(raw_search, SearchResult)
-            else SearchResult()
-        )
-        if isinstance(raw_search, BaseException):
-            _log.warning("PARALLEL search fail", error=str(raw_search))
-
         mcp_client, available_tools = (
             raw_tools if isinstance(raw_tools, tuple) else (None, [])
         )
@@ -264,15 +238,8 @@ class ChatHandler:
             if working and hasattr(working, '_messages') and working._messages:
                 working._messages[-1].emotional_context = user_emotion
 
-        if search_result.success:
-            yield ChatEvent(EventType.STATUS, " 검색 완료")
-
         # Build final prompt
-        final_prompt = self._build_final_prompt(
-            user_input=user_input,
-            search_context=search_result.context,
-            search_failed=search_result.failed,
-        )
+        final_prompt = self._build_final_prompt(user_input=user_input)
 
         yield ChatEvent(EventType.STATUS, "응답 생성 중...")
 
@@ -370,19 +337,9 @@ class ChatHandler:
     def _build_final_prompt(
         self,
         user_input: str,
-        search_context: str,
-        search_failed: bool
     ) -> str:
-        """Build the final user prompt with search results."""
-        parts = []
-
-        if search_context:
-            parts.append(f"## 검색 결과\n{search_context}")
-        elif search_failed:
-            parts.append("검색 실패")
-
-        parts.append(f"[User]: {user_input}")
-        return "\n".join(parts)
+        """Build the final user prompt."""
+        return f"[User]: {user_input}"
 
     def _spawn_task(self, coro, label: str) -> asyncio.Task:
         """Spawn a background task with cleanup callback."""
@@ -443,7 +400,6 @@ class ChatHandler:
                     "effective_model": model_config.id,
                     "tier": tier,
                     "routing_features": {
-                        "needs_search": classification.needs_search,
                         "needs_tools": classification.needs_tools,
                     },
                     "manual_override": request.model_choice != "auto",

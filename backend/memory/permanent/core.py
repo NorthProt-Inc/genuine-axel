@@ -40,6 +40,7 @@ class LongTermMemory:
         db_path: Optional[str] = None,
         embedding_model: Optional[str] = None,
         repository=None,
+        conn_mgr=None,
     ):
         """Initialize long-term memory.
 
@@ -48,9 +49,11 @@ class LongTermMemory:
             embedding_model: Model name for embeddings
             repository: Optional pre-built repository (e.g. PgMemoryRepository).
                         If provided, db_path is ignored.
+            conn_mgr: Optional connection manager for behavior metrics
         """
         self.db_path = db_path or str(CHROMADB_PATH)
         self.embedding_model = embedding_model or MemoryConfig.EMBEDDING_MODEL
+        self._conn_mgr = conn_mgr
 
         # Initialize components
         if repository is not None:
@@ -63,6 +66,7 @@ class LongTermMemory:
         self._consolidator = MemoryConsolidator(
             repository=self._repository,
             decay_calculator=self._decay_calculator,
+            conn_mgr=conn_mgr,
         )
 
         # Initialize sub-components
@@ -76,6 +80,11 @@ class LongTermMemory:
             embedding_service=self._embedding_service,
             decay_calculator=self._decay_calculator,
         )
+
+    def set_meta_memory(self, meta_memory) -> None:
+        """Inject MetaMemory reference for channel_mentions in consolidation and hot memory boosting."""
+        self._consolidator._meta_memory = meta_memory
+        self._retriever._meta_memory = meta_memory
 
     def _init_embedding_service(self) -> None:
         """Initialize embedding service with genai.Client."""

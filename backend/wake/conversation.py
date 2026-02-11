@@ -55,7 +55,6 @@ class ConversationHandler:
         return self._http
 
     async def handle_wakeword(self) -> Optional[str]:
-
         try:
 
             _log.debug("conv flow start, pause 0.5s")
@@ -103,7 +102,6 @@ class ConversationHandler:
                 os.remove(audio_path)
 
     def _record_until_silence(self) -> Optional[str]:
-
         stream = self.p.open(
             format=FORMAT,
             channels=CHANNELS,
@@ -154,7 +152,6 @@ class ConversationHandler:
         return temp_path
 
     async def _transcribe(self, audio_path: str) -> Optional[str]:
-
         client = await self._get_http()
         async with aiofiles.open(audio_path, 'rb') as f:
             audio_bytes = await f.read()
@@ -175,7 +172,6 @@ class ConversationHandler:
         return text
 
     async def _chat(self, user_text: str) -> Optional[str]:
-
         client = await self._get_http()
         resp = await client.post(
             f"{API_BASE}/v1/chat/completions",

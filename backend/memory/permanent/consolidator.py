@@ -1,10 +1,12 @@
 """Memory consolidation service."""
 
+from datetime import datetime, timezone
 from typing import Dict, List
 
 from backend.core.logging import get_logger
 from .config import MemoryConfig
 from .decay_calculator import AdaptiveDecayCalculator, get_connection_count, is_native_available
+from .importance import calculate_importance_sync
 
 _log = get_logger("memory.consolidator")
 
@@ -23,6 +25,8 @@ class MemoryConsolidator:
         repository,
         decay_calculator: AdaptiveDecayCalculator = None,
         config: MemoryConfig = None,
+        meta_memory=None,
+        conn_mgr=None,
     ):
         """Initialize consolidator.
 
@@ -30,10 +34,14 @@ class MemoryConsolidator:
             repository: ChromaDBRepository instance
             decay_calculator: Optional decay calculator
             config: Optional MemoryConfig override
+            meta_memory: Optional MetaMemory for channel_mentions lookup
+            conn_mgr: Optional connection manager for behavior metrics
         """
         self.repository = repository
         self.decay_calculator = decay_calculator or AdaptiveDecayCalculator()
         self.config = config or MemoryConfig
+        self._meta_memory = meta_memory
+        self._conn_mgr = conn_mgr
 
     def consolidate(self) -> Dict[str, int]:
         """Run memory consolidation.
@@ -53,6 +61,23 @@ class MemoryConsolidator:
             Report dict with deleted, preserved, checked counts
         """
         report = {"deleted": 0, "preserved": 0, "checked": 0}
+
+        # W5-1: Apply dynamic decay config when feature-gated on
+        from .dynamic_decay import DYNAMIC_DECAY_ENABLED
+
+        if DYNAMIC_DECAY_ENABLED:
+            from .dynamic_decay import calculate_dynamic_config, collect_behavior_metrics
+
+            metrics = collect_behavior_metrics(self._conn_mgr)
+            dynamic_config = calculate_dynamic_config(metrics)
+            self.decay_calculator.config.BASE_DECAY_RATE = dynamic_config["base_rate"]
+            self.decay_calculator.peak_hours = metrics.peak_hours
+            _log.info(
+                "Dynamic decay applied",
+                base_rate=dynamic_config["base_rate"],
+                recency_boost=dynamic_config["recency_boost"],
+                peak_hours=metrics.peak_hours,
+            )
 
         try:
             all_memories = self.repository.get_all(include=["metadatas"])
@@ -121,6 +146,10 @@ class MemoryConsolidator:
                 native=is_native_available(),
             )
 
+            # W5-2: Reassess old, high-access memories
+            reassessed = self._reassess_old_memories(ids, metadatas)
+            report["reassessed"] = reassessed
+
             return report
 
         except Exception as e:
@@ -154,7 +183,10 @@ class MemoryConsolidator:
         memories_for_decay = []
         for _, doc_id, metadata in batch_data:
             created_at = metadata.get("created_at") or metadata.get("timestamp", "")
-            importance = metadata.get("importance", 0.5)
+            importance = metadata.get("importance")
+            if importance is None:
+                importance = 0.5
+                _log.warning("importance missing, using default", doc_id=doc_id[:8])
             access_count = metadata.get("access_count", 0)
             connection_count = get_connection_count(doc_id, graph=shared_graph)
             last_accessed = metadata.get("last_accessed")
@@ -167,6 +199,11 @@ class MemoryConsolidator:
                 "connection_count": connection_count,
                 "last_accessed": last_accessed,
                 "memory_type": memory_type,
+                "channel_mentions": (
+                    self._meta_memory.get_channel_mentions(doc_id)
+                    if self._meta_memory
+                    else 0
+                ),
             })
 
         # Batch calculate decayed importance
@@ -212,3 +249,68 @@ class MemoryConsolidator:
             if doc_id not in delete_set:
                 updates.append((doc_id, decayed))
         return updates
+
+    def _reassess_old_memories(
+        self,
+        ids: List[str],
+        metadatas: List[dict],
+    ) -> int:
+        """Reassess importance of old, high-access memories.
+
+        Uses REASSESS_AGE_HOURS and REASSESS_BATCH_SIZE from config.
+        Selects memories older than the threshold with high access counts,
+        then recalculates importance using sync LLM evaluation.
+
+        Args:
+            ids: All memory IDs
+            metadatas: All memory metadata dicts
+
+        Returns:
+            Number of reassessed memories
+        """
+        age_hours = self.config.REASSESS_AGE_HOURS
+        batch_size = self.config.REASSESS_BATCH_SIZE
+        now = datetime.now(timezone.utc)
+
+        candidates = []
+        for doc_id, metadata in zip(ids, metadatas):
+            if not metadata:
+                continue
+            created_at = metadata.get("created_at", "")
+            access_count = metadata.get("access_count", 0)
+            if not created_at or access_count < 3:
+                continue
+            try:
+                created_dt = datetime.fromisoformat(created_at)
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                age = (now - created_dt).total_seconds() / 3600
+                if age >= age_hours:
+                    candidates.append((doc_id, metadata, access_count))
+            except (ValueError, TypeError):
+                continue
+
+        # Sort by access_count descending, take top batch_size
+        candidates.sort(key=lambda x: x[2], reverse=True)
+        candidates = candidates[:batch_size]
+
+        if not candidates:
+            return 0
+
+        reassessed = 0
+
+        for doc_id, metadata, _ac in candidates:
+            try:
+                content = metadata.get("content", "")
+                new_importance = calculate_importance_sync(content, "", "")
+                self.repository.batch_update_metadata(
+                    [doc_id], [{"importance": new_importance}]
+                )
+                reassessed += 1
+            except Exception as e:
+                _log.warning("Reassessment failed", doc_id=doc_id[:8], error=str(e)[:80])
+
+        if reassessed:
+            _log.info("Reassessed old memories", count=reassessed)
+
+        return reassessed

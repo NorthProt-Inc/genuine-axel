@@ -143,3 +143,59 @@ def apply_circadian_stability(
     if last_accessed_hour in peak_hours:
         return access_count + 1
     return access_count
+
+
+def collect_behavior_metrics(conn_mgr=None) -> UserBehaviorMetrics:
+    """Collect user behavior metrics from interaction logs.
+
+    Args:
+        conn_mgr: Optional SQLiteConnectionManager or PgConnectionManager.
+                  If None, returns default metrics.
+
+    Returns:
+        UserBehaviorMetrics populated from database or defaults.
+    """
+    metrics = UserBehaviorMetrics()
+
+    if conn_mgr is None:
+        return metrics
+
+    try:
+        # Attempt to query interaction logs for metrics
+        rows = conn_mgr.execute_dict(
+            """
+            SELECT
+                AVG(latency_ms) AS avg_latency,
+                COUNT(CASE WHEN tool_name IS NOT NULL THEN 1 END) AS tool_calls,
+                COUNT(*) AS total_interactions
+            FROM interaction_logs
+            WHERE created_at > NOW() - INTERVAL '7 days'
+            """
+        )
+
+        if rows:
+            row = rows[0]
+            metrics.avg_latency_ms = float(row.get("avg_latency") or 1000.0)
+            total = int(row.get("total_interactions") or 0)
+            tool_calls = int(row.get("tool_calls") or 0)
+            metrics.tool_usage_frequency = tool_calls / max(total, 1) * 10
+
+        # Session duration average
+        session_rows = conn_mgr.execute_dict(
+            """
+            SELECT AVG(EXTRACT(EPOCH FROM (ended_at - started_at))) AS avg_dur
+            FROM sessions
+            WHERE ended_at IS NOT NULL
+              AND started_at > NOW() - INTERVAL '7 days'
+            """
+        )
+        if session_rows and session_rows[0].get("avg_dur"):
+            metrics.session_duration_avg = float(session_rows[0]["avg_dur"])
+
+    except Exception as e:
+        _log.debug("Behavior metrics collection failed, using defaults", error=str(e))
+
+    metrics.engagement_score = calculate_engagement(metrics)
+    metrics.peak_hours = detect_peak_hours(metrics.hourly_activity_rate)
+
+    return metrics

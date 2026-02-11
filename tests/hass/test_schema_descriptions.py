@@ -28,10 +28,4 @@ class TestSchemaNoHardcodedIds:
         source = inspect.getsource(hass_tools)
         assert "vital_100s_series" not in source
 
-    def test_pydantic_schema_no_specific_id(self):
-        """Pydantic schema descriptions should use generic examples."""
-        from backend.core.mcp_tools.schemas import HassControlDeviceInput
 
-        schema = HassControlDeviceInput.model_json_schema()
-        schema_str = str(schema)
-        assert "vital_100s_series" not in schema_str

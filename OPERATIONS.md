@@ -59,6 +59,8 @@
 
 ### 포트 매핑
 
+> ℹ️ Discord/Telegram 봇은 `axnmihn-backend` 프로세스 내에서 실행됩니다 (별도 포트 불필요).
+
 | 포트 | 서비스 | 접근 |
 |------|--------|------|
 | 3000 | Open WebUI | Public |
@@ -89,6 +91,7 @@
 │   ├── llm/              # LLM 프로바이더
 │   ├── memory/           # 6계층 메모리 시스템
 │   ├── native/           # C++17 확장 모듈
+│   ├── channels/         # 채널 어댑터 (Discord, Telegram)
 │   └── protocols/mcp/    # MCP 프로토콜 핸들러
 ├── tests/                # pytest 테스트
 ├── scripts/              # 자동화 스크립트
@@ -128,6 +131,7 @@
 ├── context7-mcp-restart.service / .timer
 ├── markitdown-mcp.service
 ├── markitdown-mcp-restart.service / .timer
+├── claude-review.service / .timer
 └── auto-cleanup.service / .timer
 ```
 
@@ -769,12 +773,16 @@ systemctl --user restart axnmihn-backend
 
 | 스크립트 | 설명 |
 |----------|------|
-| `scripts/memory_gc.py` | 메모리 가비지 컬렉션 |
-| `scripts/db_maintenance.py` | SQLite 유지보수 |
-| `scripts/regenerate_persona.py` | 페르소나 재생성 |
-| `scripts/night_ops.py` | 야간 자동화 작업 |
-| `scripts/optimize_memory.py` | 메모리 최적화 |
-| `scripts/cleanup_messages.py` | 메시지 정리 (LLM) |
+| `scripts/memory_gc.py` | 메모리 가비지 컬렉션 (중복제거, decay, 대형 항목 제거) |
+| `scripts/db_maintenance.py` | SQLite VACUUM, ANALYZE, 무결성 검사 |
+| `scripts/regenerate_persona.py` | 페르소나 재생성 (7일 증분/전체) |
+| `scripts/night_ops.py` | 야간 자동화 리서치 작업 |
+| `scripts/optimize_memory.py` | 4단계 메모리 최적화 (텍스트 정리, 역할 정규화) |
+| `scripts/cleanup_messages.py` | LLM 기반 메시지 정리 (병렬, 체크포인트) |
+| `scripts/dedup_knowledge_graph.py` | 지식 그래프 중복 제거 |
+| `scripts/populate_knowledge_graph.py` | 지식 그래프 초기 구축 |
+| `scripts/run_migrations.py` | 데이터베이스 스키마 마이그레이션 |
+| `scripts/cron_memory_gc.sh` | cron용 메모리 GC 래퍼 스크립트 |
 
 ---
 
@@ -1515,6 +1523,8 @@ systemctl --user restart axnmihn-backend
 | `AXNMIHN_API_KEY` | API authentication | `.env` |
 | `GEMINI_API_KEY` | Gemini LLM | `.env` |
 | `ANTHROPIC_API_KEY` | Claude LLM | `.env` |
+| `DISCORD_BOT_TOKEN` | Discord bot token | `.env` |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token | `.env` |
 | `DATABASE_URL` | PostgreSQL (optional) | `.env` |
 | `PYTHONPATH` | `/home/northprot/projects/axnmihn` | systemd |
 
@@ -1524,12 +1534,16 @@ systemctl --user restart axnmihn-backend
 
 | Script | Description |
 |--------|-------------|
-| `scripts/memory_gc.py` | Memory garbage collection |
-| `scripts/db_maintenance.py` | SQLite maintenance |
-| `scripts/regenerate_persona.py` | Persona regeneration |
-| `scripts/night_ops.py` | Night automation |
-| `scripts/optimize_memory.py` | Memory optimization |
-| `scripts/cleanup_messages.py` | Message cleanup (LLM) |
+| `scripts/memory_gc.py` | Memory garbage collection (dedup, decay, oversized removal) |
+| `scripts/db_maintenance.py` | SQLite VACUUM, ANALYZE, integrity check |
+| `scripts/regenerate_persona.py` | Persona regeneration (7-day incremental/full) |
+| `scripts/night_ops.py` | Automated night shift research |
+| `scripts/optimize_memory.py` | 4-phase memory optimization (text cleaning, role normalization) |
+| `scripts/cleanup_messages.py` | LLM-powered message cleanup (parallel, checkpointed) |
+| `scripts/dedup_knowledge_graph.py` | Knowledge graph deduplication |
+| `scripts/populate_knowledge_graph.py` | Knowledge graph initial population |
+| `scripts/run_migrations.py` | Database schema migrations |
+| `scripts/cron_memory_gc.sh` | Cron wrapper for memory GC |
 
 ---
 

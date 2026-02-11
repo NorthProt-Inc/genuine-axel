@@ -17,25 +17,24 @@ from __future__ import annotations
 import os
 import time
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.llm.clients import (
+from backend.llm.anthropic_client import AnthropicClient
+from backend.llm.base import BaseLLMClient, get_llm_client
+from backend.llm.circuit_breaker import (
     AdaptiveTimeout,
-    AnthropicClient,
-    BaseLLMClient,
     CircuitBreakerState,
-    DEFAULT_PROVIDER,
-    GeminiClient,
-    LLMProvider,
-    LLM_PROVIDERS,
-    _adaptive_timeout,
     _calculate_dynamic_timeout,
+)
+from backend.llm.gemini_client import GeminiClient
+from backend.llm.providers import (
+    DEFAULT_PROVIDER,
+    LLM_PROVIDERS,
+    LLMProvider,
     _gemini_schema_to_anthropic,
     get_all_providers,
-    get_llm_client,
     get_provider,
 )
 

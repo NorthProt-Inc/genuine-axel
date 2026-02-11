@@ -49,7 +49,7 @@ def _parse_importance(text: str) -> float:
     match = re.search(r"(0\.\d+|1\.0|1)", text.strip())
     if match:
         return float(match.group(1))
-    return 0.7
+    return 0.5
 
 
 async def calculate_importance_async(
@@ -79,11 +79,11 @@ async def calculate_importance_async(
 
     except TimeoutError:
         _log.warning("MEM importance timeout", timeout=IMPORTANCE_TIMEOUT_SECONDS)
-        return 0.7
+        return 0.5
 
     except Exception as e:
         _log.warning("MEM importance fail", error=str(e)[:100])
-        return 0.7
+        return 0.5
 
 
 def calculate_importance_sync(
@@ -115,8 +115,8 @@ def calculate_importance_sync(
 
     except TimeoutError:
         _log.warning("MEM importance timeout", timeout=IMPORTANCE_TIMEOUT_SECONDS)
-        return 0.7
+        return 0.5
 
     except Exception as e:
         _log.warning("MEM importance fail", error=str(e)[:100])
-        return 0.7
+        return 0.5

@@ -77,7 +77,6 @@ async def run_command(arguments: dict[str, Any]) -> Sequence[TextContent]:
         )
 
         def safe_decode(data: bytes) -> str:
-
             modes = ["cp949", "utf-8", "latin-1"]
             for mode in modes:
                 try:

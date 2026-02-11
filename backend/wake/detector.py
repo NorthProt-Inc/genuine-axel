@@ -29,7 +29,6 @@ class WakewordDetector:
         _log.info("wakeword mdl loaded", sensitivity=sensitivity, gain=gain)
 
     def start(self):
-
         self.stream = self.p.open(
             format=FORMAT,
             channels=CHANNELS,
@@ -41,7 +40,6 @@ class WakewordDetector:
         _log.info("mic strm start", dev=self.device_index or "default")
 
     def stop(self):
-
         if self.stream:
             self.stream.stop_stream()
             self.stream.close()
@@ -56,7 +54,6 @@ class WakewordDetector:
         _log.debug("det buf reset")
 
     def listen(self):
-
         if not self.stream:
             self.start()
 

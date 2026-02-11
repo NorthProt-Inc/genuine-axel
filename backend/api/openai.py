@@ -43,7 +43,6 @@ MODEL_TIER_MAP = {
 
 @router.get("/v1/models")
 async def openai_list_models():
-
     return {
         "object": "list",
         "data": [
@@ -61,7 +60,6 @@ async def openai_list_models():
 
 @router.post("/v1/chat/completions")
 async def openai_chat_completions(request_body: OpenAIChatRequest):
-
     user_messages = [m for m in request_body.messages if m.role == "user"]
     if not user_messages:
         raise HTTPException(status_code=400, detail="No user message found")
@@ -108,7 +106,6 @@ def _is_b64_too_large(b64_data: str, max_bytes: int) -> bool:
     return _b64_length_to_bytes(len(b64_data)) > max_bytes
 
 def _parse_multimodal_content(content: Any) -> tuple[str, list]:
-
     if isinstance(content, str):
         return content, []
 
@@ -153,7 +150,6 @@ def _parse_multimodal_content(content: Any) -> tuple[str, list]:
     return user_input, multimodal_images
 
 def _parse_file_attachment(file_obj: dict, part: dict) -> tuple[str, list]:
-
     extracted_content = ""
     images = []
 
@@ -218,7 +214,6 @@ def _parse_file_attachment(file_obj: dict, part: dict) -> tuple[str, list]:
     return extracted_content, images
 
 async def _stream_openai_response(handler: ChatHandler, request: HandlerRequest):
-
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
     created = int(time.time())
     stream_id = uuid.uuid4().hex[:8]
@@ -333,7 +328,6 @@ async def _stream_openai_response(handler: ChatHandler, request: HandlerRequest)
         _log.debug("stream ended", stream_id=stream_id, active_count=len(state.active_streams))
 
 async def _non_stream_openai_response(handler: ChatHandler, request: HandlerRequest) -> dict:
-
     response_parts: list[str] = []
 
     async for event in handler.process(request):

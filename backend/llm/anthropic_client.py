@@ -157,8 +157,12 @@ class AnthropicClient(BaseLLMClient):
             if isinstance(error, self._anthropic.RateLimitError):
                 return True
             if isinstance(error, self._anthropic.APIStatusError):
-                return getattr(error, "status_code", 0) == 529
+                return getattr(error, "status_code", 0) in (429, 503, 529)
             if isinstance(error, (self._anthropic.APITimeoutError, self._anthropic.APIConnectionError)):
+                return True
+            # Fallback: check error string for retryable patterns (e.g. streaming overloaded errors)
+            error_str = str(error).lower()
+            if any(p in error_str for p in ("overloaded", "529", "503", "rate_limit")):
                 return True
             return False
 
@@ -204,16 +208,19 @@ class AnthropicClient(BaseLLMClient):
                             current_tool_json = ""
 
         def _on_retry(attempt: int, error: Exception, delay: float) -> None:
-            error_type = classify_error(error)
-            AnthropicClient._circuit_breaker.record_failure(error_type)
-            error_monitor.record(error_type, str(error)[:200])
+            error_monitor.record(classify_error(error), str(error)[:200])
 
-        async for item in retry_async_generator(
-            _create_stream,
-            config=anthropic_retry_config,
-            on_retry=_on_retry,
-        ):
-            yield item
+        try:
+            async for item in retry_async_generator(
+                _create_stream,
+                config=anthropic_retry_config,
+                on_retry=_on_retry,
+            ):
+                yield item
+        except Exception as e:
+            error_type = classify_error(e)
+            AnthropicClient._circuit_breaker.record_failure(error_type)
+            raise
 
         AnthropicClient._circuit_breaker.record_success()
         stream_elapsed = time.time() - stream_start_time

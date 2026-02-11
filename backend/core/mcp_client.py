@@ -41,7 +41,6 @@ CORE_TOOLS = frozenset([
 MAX_TOOLS = MCP_MAX_TOOLS
 
 class MCPClient:
-
     TOOLS_CACHE_TTL = 300
 
     def __init__(self, base_url: Optional[str] = None):
@@ -76,7 +75,9 @@ class MCPClient:
             from backend.core.mcp_server import call_tool as mcp_call_tool
             result = await mcp_call_tool(name, arguments)
             texts = [r.text for r in result if hasattr(r, "text")]
-            return {"success": True, "result": "\n".join(texts)}
+            joined = "\n".join(texts)
+            has_error = any(t.startswith("Error:") for t in texts)
+            return {"success": not has_error, "result": joined}
 
         try:
             return await retry_async(_direct_call, config=MCP_RETRY_CONFIG)

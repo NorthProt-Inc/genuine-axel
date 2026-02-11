@@ -29,7 +29,6 @@ def _sanitize_filename(filename: str) -> str:
 async def transcribe_audio_endpoint(
     audio: UploadFile = File(...),
 ):
-
     _log.info("REQ recv", path="/transcribe", filename=audio.filename)
     content = await read_upload_file(audio, MAX_AUDIO_BYTES)
 
@@ -45,7 +44,6 @@ async def transcribe_audio_endpoint(
 
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-
     _log.info("REQ recv", path="/upload", filename=file.filename, content_type=file.content_type)
     safe_name = _sanitize_filename(file.filename or "upload.bin")
     file_extension = Path(safe_name).suffix.lower()

@@ -11,7 +11,6 @@ _log = get_logger("api.mcp")
 router = APIRouter(tags=["MCP"], dependencies=[Depends(require_api_key)])
 
 def _get_mcp_server() -> MCPServer:
-
     state = get_state()
     if state.mcp_server is None:
         state.mcp_server = MCPServer(
@@ -23,7 +22,6 @@ def _get_mcp_server() -> MCPServer:
 
 @router.get("/mcp/status")
 async def get_mcp_status():
-
     _log.debug("REQ recv", path="/mcp/status")
     mcp = _get_mcp_server()
     result = {
@@ -38,7 +36,6 @@ async def get_mcp_status():
 
 @router.get("/mcp/manifest")
 async def get_mcp_manifest():
-
     _log.debug("REQ recv", path="/mcp/manifest")
     mcp = _get_mcp_server()
     manifest = mcp.get_manifest()
@@ -46,14 +43,12 @@ async def get_mcp_manifest():
     return manifest
 
 class MCPExecuteRequest(BaseModel):
-
     id: Any
     method: str
     params: Dict[str, Any] = {}
 
 @router.post("/mcp/execute")
 async def execute_mcp(request: MCPExecuteRequest):
-
     _log.info("REQ recv", path="/mcp/execute", method=request.method, req_id=request.id)
     mcp = _get_mcp_server()
     try:

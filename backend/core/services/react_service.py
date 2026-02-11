@@ -215,6 +215,20 @@ class ReActLoopService:
                     error_str = str(e).lower()
                     _log.error("LLM stream error", error=str(e)[:200], partial_len=len(full_response))
 
+                    _retryable_patterns = ("overloaded", "529", "503", "rate_limit")
+                    is_retryable = any(p in error_str for p in _retryable_patterns)
+                    if is_retryable and retry_count < REACT_MAX_RETRIES:
+                        retry_count += 1
+                        delay = REACT_RETRY_BASE_DELAY * (2 ** (retry_count - 1))
+                        _log.warning(
+                            "LLM retryable error, retrying",
+                            error=str(e)[:200],
+                            retry=retry_count,
+                            delay=delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+
                     if full_response.strip():
                         _log.warning("LLM partial used", chars=len(full_response))
                         break

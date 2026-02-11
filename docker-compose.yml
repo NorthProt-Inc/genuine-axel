@@ -24,6 +24,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-axel}:${POSTGRES_PASSWORD:-axel_dev_password}@localhost:5432/${POSTGRES_DB:-axel}
       HOST: '0.0.0.0'
       PORT: '8000'
+      # Channel adapters (set in .env to enable)
+      # DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      # TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
     volumes:
       - app-data:/app/data
       - app-logs:/app/logs

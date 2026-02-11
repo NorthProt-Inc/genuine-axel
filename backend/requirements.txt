@@ -2,6 +2,7 @@ fastapi
 uvicorn
 pydantic
 google-genai
+anthropic
 requests
 chromadb
 python-multipart
@@ -14,6 +15,7 @@ tavily-python
 filelock
 pytz
 pymupdf
+psycopg2-binary
 mcp>=1.0.0
 sse-starlette>=2.0.0
 # Research MCP dependencies
@@ -23,3 +25,5 @@ beautifulsoup4>=4.12.0
 lxml>=5.0.0
 soundfile
 pyyaml
+discord.py>=2.3
+python-telegram-bot>=21.0

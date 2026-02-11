@@ -57,7 +57,6 @@ ENGLISH_RELATIVE_PATTERNS = {
 }
 
 def parse_temporal_query(query: str) -> Optional[Dict[str, Any]]:
-
     query_lower = query.lower()
 
     result = _parse_korean_date(query)
@@ -88,7 +87,6 @@ def parse_temporal_query(query: str) -> Optional[Dict[str, Any]]:
     return None
 
 def _parse_korean_date(query: str) -> Optional[Dict[str, Any]]:
-
     match = KOREAN_DATE_PATTERN.search(query)
     if match:
         year = int(match.group(1)) if match.group(1) else now_vancouver().year
@@ -127,7 +125,6 @@ def _parse_korean_date(query: str) -> Optional[Dict[str, Any]]:
         return None
 
 def _parse_korean_relative(query: str) -> Optional[Dict[str, Any]]:
-
     for pattern, handler in KOREAN_RELATIVE_PATTERNS.items():
         if handler is None:
             continue
@@ -153,7 +150,6 @@ def _parse_korean_relative(query: str) -> Optional[Dict[str, Any]]:
     return None
 
 def _parse_english_date(query: str) -> Optional[Dict[str, Any]]:
-
     match = ENGLISH_DATE_PATTERN.search(query)
     if not match:
         return None
@@ -173,7 +169,6 @@ def _parse_english_date(query: str) -> Optional[Dict[str, Any]]:
         return None
 
 def _parse_english_relative(query: str) -> Optional[Dict[str, Any]]:
-
     for pattern, handler in ENGLISH_RELATIVE_PATTERNS.items():
         if handler is None:
             continue
@@ -192,7 +187,6 @@ def _parse_english_relative(query: str) -> Optional[Dict[str, Any]]:
     return None
 
 def _parse_iso_date(query: str) -> Optional[Dict[str, Any]]:
-
     match = ISO_DATE_PATTERN.search(query)
     if not match:
         return None
@@ -208,7 +202,6 @@ def _parse_iso_date(query: str) -> Optional[Dict[str, Any]]:
         return None
 
 def _build_exact_filter(date) -> Dict[str, Any]:
-
     date_str = date.isoformat()
     next_day = (datetime.combine(date, datetime.min.time()) + timedelta(days=1)).date()
 
@@ -220,7 +213,6 @@ def _build_exact_filter(date) -> Dict[str, Any]:
     }
 
 def _build_range_filter(from_date, to_date) -> Dict[str, Any]:
-
     end_date = (datetime.combine(to_date, datetime.min.time()) + timedelta(days=1)).date()
 
     return {

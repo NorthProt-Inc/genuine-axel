@@ -249,16 +249,19 @@ class GeminiClient(BaseLLMClient):
                     yield (text_chunk, is_thought, None)
 
         def _on_retry(attempt: int, error: Exception, delay: float) -> None:
-            error_type = classify_error(error)
-            GeminiClient._circuit_breaker.record_failure(error_type)
-            error_monitor.record(error_type, str(error)[:200])
+            error_monitor.record(classify_error(error), str(error)[:200])
 
-        async for item in retry_async_generator(
-            _create_stream,
-            config=GEMINI_STREAM_RETRY_CONFIG,
-            on_retry=_on_retry,
-        ):
-            yield item
+        try:
+            async for item in retry_async_generator(
+                _create_stream,
+                config=GEMINI_STREAM_RETRY_CONFIG,
+                on_retry=_on_retry,
+            ):
+                yield item
+        except Exception as e:
+            error_type = classify_error(e)
+            GeminiClient._circuit_breaker.record_failure(error_type)
+            raise
 
         GeminiClient._circuit_breaker.record_success()
         stream_elapsed = time.time() - stream_start_time

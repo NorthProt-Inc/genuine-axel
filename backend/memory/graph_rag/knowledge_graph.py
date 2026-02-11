@@ -20,7 +20,6 @@ from .utils import (
 
 @dataclass
 class Entity:
-
     id: str
     name: str
     entity_type: str
@@ -34,7 +33,6 @@ class Entity:
 
 @dataclass
 class Relation:
-
     source_id: str
     target_id: str
     relation_type: str
@@ -48,7 +46,6 @@ class Relation:
 
 @dataclass
 class GraphQueryResult:
-
     entities: List[Entity]
     relations: List[Relation]
     paths: List[List[str]]
@@ -56,7 +53,6 @@ class GraphQueryResult:
     relevance_score: float
 
 class KnowledgeGraph:
-
     def __init__(self, persist_path: Optional[str] = None, pg_repository=None):
         self._pg = pg_repository
         self.entities: Dict[str, Entity] = {}

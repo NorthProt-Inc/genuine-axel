@@ -8,7 +8,6 @@ from .formatters import JsonFormatter, PlainFormatter, SmartFormatter
 
 
 def _configure_root_logger():
-
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
     if not root.handlers:
@@ -19,7 +18,6 @@ _configure_root_logger()
 
 
 class StructuredLogger:
-
     def __init__(self, name: str, level: Optional[int] = None):
         self._logger = logging.getLogger(name)
         effective_level = level or DEFAULT_LEVEL
@@ -43,7 +41,7 @@ class StructuredLogger:
                         backupCount=5
                     )
                     fh.setFormatter(PlainFormatter())
-                    fh.setLevel(logging.DEBUG)
+                    fh.setLevel(effective_level)
                     self._logger.addHandler(fh)
                 except Exception:
                     pass
@@ -85,7 +83,6 @@ class StructuredLogger:
         self._log(logging.CRITICAL, msg, **kwargs)
 
     def exception(self, msg: str, **kwargs) -> None:
-
         record = self._logger.makeRecord(
             self._logger.name, logging.ERROR, "", 0, msg, (), sys.exc_info()
         )
@@ -97,17 +94,14 @@ _loggers: dict[str, StructuredLogger] = {}
 
 
 def get_logger(name: str = "axnmihn") -> StructuredLogger:
-
     if name not in _loggers:
         _loggers[name] = StructuredLogger(name)
     return _loggers[name]
 
 
 def set_log_level(level: str) -> None:
-
     numeric = LOG_LEVEL_MAP.get(level.upper(), logging.DEBUG)
     for logger in _loggers.values():
         logger._logger.setLevel(numeric)
         for h in logger._logger.handlers:
-            if isinstance(h, logging.StreamHandler):
-                h.setLevel(numeric)
+            h.setLevel(numeric)

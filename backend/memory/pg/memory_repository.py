@@ -34,6 +34,11 @@ class PgMemoryRepository:
         doc_id = doc_id or str(uuid.uuid4())
         now = now_vancouver().isoformat()
 
+        importance = metadata.get("importance")
+        if importance is None:
+            importance = 0.5
+            _log.warning("importance missing, using default", doc_id=doc_id[:8])
+
         sql = """
             INSERT INTO memories
                 (uuid, content, memory_type, importance, embedding,
@@ -48,7 +53,7 @@ class PgMemoryRepository:
             doc_id,
             content,
             metadata.get("type", "insight"),
-            metadata.get("importance", 0.5),
+            importance,
             str(embedding),
             metadata.get("source_session"),
             metadata.get("source_channel"),

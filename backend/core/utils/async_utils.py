@@ -5,7 +5,6 @@ from backend.core.logging import get_logger
 _log = get_logger("async_utils")
 
 class ConcurrencyLimitError(Exception):
-
     pass
 
 from backend.core.utils.lazy import Lazy

@@ -17,7 +17,6 @@ from backend.config import (
 
 @dataclass
 class MemGPTConfig:
-
     max_context_tokens: int = CONFIG_MAX_CONTEXT_TOKENS
     long_term_budget: int = MEMORY_LONG_TERM_BUDGET
 
@@ -30,7 +29,7 @@ class MemGPTConfig:
     max_similar_memories: int = 2
 
     semantic_threshold_days: int = 5
-    min_episodic_repetitions: int = 1
+    min_episodic_repetitions: int = 2
 
     eviction_page_size: int = 200
     llm_concurrency: int = 3
@@ -39,7 +38,6 @@ DEFAULT_CONFIG = MemGPTConfig()
 
 @dataclass
 class ScoredMemory:
-
     id: str
     content: str
     score: float
@@ -48,14 +46,12 @@ class ScoredMemory:
 
 @dataclass
 class SemanticKnowledge:
-
     knowledge: str
     confidence: float
     source_count: int
     topics: List[str] = field(default_factory=list)
 
 class MemGPTManager:
-
     def __init__(
         self,
         long_term_memory,

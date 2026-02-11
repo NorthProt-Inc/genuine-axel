@@ -8,13 +8,11 @@ _log = get_logger("rate-limiter")
 
 @dataclass
 class RateLimitConfig:
-
     requests_per_minute: int = 100
     burst_size: int = 10
     retry_after_seconds: float = 1.0
 
 class TokenBucketRateLimiter:
-
     def __init__(self, config: Optional[RateLimitConfig] = None, name: str = "default"):
         self.config = config or RateLimitConfig()
         self.name = name
@@ -31,7 +29,6 @@ class TokenBucketRateLimiter:
         )
 
     async def acquire(self, timeout: float = 30.0) -> bool:
-
         start_time = time.monotonic()
 
         while True:
@@ -57,7 +54,6 @@ class TokenBucketRateLimiter:
             await asyncio.sleep(wait_time)
 
     def try_acquire(self) -> bool:
-
         self._refill_tokens()
 
         if self._tokens >= 1.0:
@@ -66,7 +62,6 @@ class TokenBucketRateLimiter:
         return False
 
     def _refill_tokens(self) -> None:
-
         now = time.monotonic()
         elapsed = now - self._last_update
         self._last_update = now
@@ -78,7 +73,6 @@ class TokenBucketRateLimiter:
 
     @property
     def available_tokens(self) -> float:
-
         self._refill_tokens()
         return self._tokens
 

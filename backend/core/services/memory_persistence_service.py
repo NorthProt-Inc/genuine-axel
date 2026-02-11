@@ -150,17 +150,58 @@ class MemoryPersistenceService:
                 source="conversation",
                 timeout_seconds=120
             )
-            if result.get("entities_added", 0) > 0:
+            entities_added = result.get("entities_added", 0)
+            if entities_added > 0:
                 _log.debug(
                     "BG graph done",
-                    entities=result.get("entities_added", 0),
+                    entities=entities_added,
                     rels=result.get("relations_added", 0)
                 )
+
+                # W4-2: Feed back to M3 — increment connection_count for related memories
+                if self.long_term:
+                    await self._update_m3_connection_counts(user_input, entities_added)
+
             return result
 
         except Exception as e:
             _log.debug("BG graph skip", error=str(e)[:100])
             return {"error": str(e), "entities_added": 0, "relations_added": 0}
+
+    async def _update_m3_connection_counts(
+        self, query: str, new_entities: int
+    ) -> None:
+        """Update connection_count metadata on related M3 memories.
+
+        Args:
+            query: Original user input to find related memories
+            new_entities: Number of newly extracted entities
+        """
+        try:
+            related = await asyncio.to_thread(
+                self.long_term.query, query, n_results=5
+            )
+            if not related:
+                return
+
+            for mem in related:
+                doc_id = mem.get("id")
+                metadata = mem.get("metadata", {})
+                if not doc_id:
+                    continue
+                current_count = metadata.get("connection_count", 0)
+                new_count = current_count + new_entities
+                self.long_term._repository.update_metadata(
+                    doc_id, {"connection_count": new_count}
+                )
+
+            _log.debug(
+                "M3 connection_count updated",
+                memories=len(related),
+                increment=new_entities,
+            )
+        except Exception as e:
+            _log.debug("M3 connection_count update fail", error=str(e)[:100])
 
     async def add_assistant_message(self, response: str) -> None:
         """Add assistant message to working memory."""

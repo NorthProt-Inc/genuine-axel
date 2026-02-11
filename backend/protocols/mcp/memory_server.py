@@ -112,7 +112,6 @@ async def retrieve_context(
                 metadata["chromadb_results"] = len(results)
 
                 def get_sort_timestamp(mem):
-
                     meta = mem.get("metadata", {})
                     ts = meta.get("event_timestamp") or meta.get("created_at") or ""
                     parsed = _parse_timestamp(ts)
@@ -276,7 +275,6 @@ def _format_memory_age(timestamp_str: str) -> str:
         return ""
 
 async def get_recent_logs(limit: int = 50) -> Dict[str, Any]:
-
     _log.info("REQ handling", tool="get_recent_logs", params=["limit"])
     memory_manager, _, session_archive, _ = _get_memory_components()
 

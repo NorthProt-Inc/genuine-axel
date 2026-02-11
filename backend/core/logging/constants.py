@@ -44,6 +44,13 @@ MODULE_COLORS = {
     "media":     "\033[38;5;208m",
     "wake":      "\033[91m",
     "tools":     "\033[97m",
+    "research":  "\033[38;5;39m",
+    "services":  "\033[38;5;147m",
+    "app":       "\033[96m",
+    "config":    "\033[96m",
+    "opus":      "\033[38;5;213m",
+    "tracker":   "\033[90m",
+    "utils":     "\033[37m",
 }
 
 MODULE_ABBREV = {
@@ -56,6 +63,13 @@ MODULE_ABBREV = {
     "media": "MED",
     "wake": "WAK",
     "tools": "TOL",
+    "research": "RSC",
+    "services": "SVC",
+    "app": "APP",
+    "config": "CFG",
+    "opus": "OPU",
+    "tracker": "TRK",
+    "utils": "UTL",
 }
 
 ABBREV = {
@@ -104,7 +118,6 @@ ABBREV = {
 
 
 def abbreviate(text: str) -> str:
-
     result = text
     for full, abbr in ABBREV.items():
 
@@ -114,10 +127,8 @@ def abbreviate(text: str) -> str:
 
 
 class Colors:
-
     @staticmethod
     def _enabled() -> bool:
-
         if os.getenv("NO_COLOR"):
             return False
         return sys.stdout.isatty()

@@ -32,7 +32,6 @@ async def _read_file_safe(path: Path) -> str:
     }
 )
 async def query_axel_memory(arguments: dict[str, Any]) -> Sequence[TextContent]:
-
     query = arguments.get("query", "").lower()
     _log.debug("TOOL invoke", fn="query_axel_memory", query=query[:50] if query else None)
 
@@ -81,7 +80,6 @@ async def query_axel_memory(arguments: dict[str, Any]) -> Sequence[TextContent]:
     }
 )
 async def add_memory(arguments: dict[str, Any]) -> Sequence[TextContent]:
-
     content = arguments.get("content", "")
     category = arguments.get("category", "observation")
     _log.debug("TOOL invoke", fn="add_memory", category=category, content_len=len(content) if content else 0)
@@ -158,7 +156,6 @@ IMPORTANCE (0.0-1.0):
     }
 )
 async def store_memory(arguments: dict[str, Any]) -> Sequence[TextContent]:
-
     content = arguments.get("content", "")
     category = arguments.get("category", "conversation")
     importance = arguments.get("importance", 0.5)
@@ -231,7 +228,6 @@ Returns formatted context string with relevant memories.""",
     }
 )
 async def retrieve_context(arguments: dict[str, Any]) -> Sequence[TextContent]:
-
     query = arguments.get("query", "")
     max_results = arguments.get("max_results", 10)
     _log.debug("TOOL invoke", fn="retrieve_context", query=query[:50] if query else None, max_results=max_results)
@@ -289,7 +285,6 @@ Returns session summaries and interaction metadata.""",
     }
 )
 async def get_recent_logs(arguments: dict[str, Any]) -> Sequence[TextContent]:
-
     limit = arguments.get("limit", 50)
     _log.debug("TOOL invoke", fn="get_recent_logs", limit=limit)
 
@@ -334,7 +329,6 @@ Returns:
     }
 )
 async def memory_stats(arguments: dict[str, Any]) -> Sequence[TextContent]:
-
     _log.debug("TOOL invoke", fn="memory_stats")
 
     try:

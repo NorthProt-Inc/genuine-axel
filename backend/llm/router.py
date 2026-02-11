@@ -7,7 +7,6 @@ _log = get_logger("llm.router")
 
 @dataclass
 class ModelConfig:
-
     id: str
     name: str
     provider: str

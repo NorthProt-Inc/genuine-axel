@@ -224,6 +224,16 @@ class ContextService:
         if session_archive_data:
             optimizer.add_section("session_archive", session_archive_data)
 
+        # W3-2: M0 Event Buffer context
+        event_buffer_data = self._fetch_event_buffer_data()
+        if event_buffer_data:
+            optimizer.add_section("event_buffer", event_buffer_data)
+
+        # W3-2: M5 Hot Memories context
+        hot_memories_data = self._fetch_hot_memories_data()
+        if hot_memories_data:
+            optimizer.add_section("hot_memories", hot_memories_data)
+
         # Code context (optional)
         code_summary, code_files_content = await self._build_code_context(
             user_input, classification
@@ -496,3 +506,59 @@ class ContextService:
         except Exception as e:
             _log.warning("CTX code fail", error=str(e))
             return "", ""
+
+    def _fetch_event_buffer_data(self) -> Optional[str]:
+        """Fetch M0 event buffer recent events.
+
+        Returns:
+            Formatted event buffer string, or None if unavailable.
+        """
+        if not self.memory_manager or not hasattr(self.memory_manager, 'event_buffer'):
+            return None
+
+        try:
+            events = self.memory_manager.event_buffer.get_recent(limit=5)
+            if not events:
+                return None
+
+            lines = []
+            for event in events:
+                event_type = event.type.value if hasattr(event.type, 'value') else str(event.type)
+                lines.append(f"- [{event_type}] {event.metadata}")
+
+            if lines:
+                _log.debug("CTX event_buffer", events=len(lines))
+                return "\n".join(lines)
+        except Exception as e:
+            _log.debug("CTX event_buffer fail", error=str(e))
+
+        return None
+
+    def _fetch_hot_memories_data(self) -> Optional[str]:
+        """Fetch M5 hot memories.
+
+        Returns:
+            Formatted hot memories string, or None if unavailable.
+        """
+        if not self.memory_manager or not hasattr(self.memory_manager, 'meta_memory'):
+            return None
+
+        try:
+            hot = self.memory_manager.meta_memory.get_hot_memories(limit=5)
+            if not hot:
+                return None
+
+            lines = []
+            for h in hot:
+                mid = h["memory_id"][:8]
+                count = h["access_count"]
+                channels = h["channel_diversity"]
+                lines.append(f"- {mid}… (access: {count}, channels: {channels})")
+
+            if lines:
+                _log.debug("CTX hot_memories", count=len(lines))
+                return "\n".join(lines)
+        except Exception as e:
+            _log.debug("CTX hot_memories fail", error=str(e))
+
+        return None

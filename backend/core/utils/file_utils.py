@@ -11,7 +11,6 @@ TMP_FILE_PREFIX = ".axnmihn_tmp_"
 TMP_MAX_AGE_SECONDS = 3600
 
 def fsync_directory(dir_path: Path) -> None:
-
     if os.name == "nt":
         return
 
@@ -28,7 +27,6 @@ def fsync_directory(dir_path: Path) -> None:
         _log.warning("Directory fsync failed", path=str(dir_path), error=str(e))
 
 def cleanup_orphaned_tmp_files(dir_path: Path) -> int:
-
     if not dir_path.exists():
         return 0
 
@@ -55,7 +53,6 @@ def cleanup_orphaned_tmp_files(dir_path: Path) -> int:
     return deleted
 
 async def startup_cleanup(data_dirs: List[Path]) -> int:
-
     from backend.core.utils.async_utils import bounded_to_thread
     import asyncio
 
@@ -96,7 +93,6 @@ def _get_locks_lock() -> asyncio.Lock:
     return _locks_lock.get()
 
 def _acquire_os_lock(lock_path: str, timeout_seconds: float = 10.0) -> int:
-
     if os.name == "nt":
         raise RuntimeError("OS lock not supported on Windows. Set ENABLE_OS_LOCK=False")
 
@@ -118,7 +114,6 @@ def _acquire_os_lock(lock_path: str, timeout_seconds: float = 10.0) -> int:
         raise
 
 def _release_os_lock(lock_fd: int) -> None:
-
     if os.name == "nt":
         return
 
@@ -130,7 +125,6 @@ def _release_os_lock(lock_fd: int) -> None:
         _log.warning("OS lock release failed", error=str(e))
 
 async def get_async_file_lock(path: Path) -> asyncio.Lock:
-
     path_key = str(path.resolve())
 
     async with _get_locks_lock():
@@ -140,7 +134,6 @@ async def get_async_file_lock(path: Path) -> asyncio.Lock:
 
 @asynccontextmanager
 async def async_file_lock(path: Path):
-
     os_lock_fd = None
     lock_file_path = str(path.resolve()) + ".lock"
 

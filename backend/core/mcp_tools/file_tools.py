@@ -21,7 +21,6 @@ _log = get_logger("mcp.file_tools")
     }
 )
 async def read_file(arguments: dict[str, Any]) -> Sequence[TextContent]:
-
     path_str = arguments.get("path", "")
     _log.debug("TOOL invoke", fn="read_file", path=path_str[:100] if path_str else None)
 
@@ -82,7 +81,6 @@ async def read_file(arguments: dict[str, Any]) -> Sequence[TextContent]:
     }
 )
 async def list_directory(arguments: dict[str, Any]) -> Sequence[TextContent]:
-
     path_str = arguments.get("path", "")
     _log.debug("TOOL invoke", fn="list_directory", path=path_str[:100] if path_str else None)
 
@@ -140,7 +138,6 @@ async def list_directory(arguments: dict[str, Any]) -> Sequence[TextContent]:
     }
 )
 async def get_source_code(arguments: dict[str, Any]) -> Sequence[TextContent]:
-
     relative_path = arguments.get("relative_path", "")
     _log.debug("TOOL invoke", fn="get_source_code", relative_path=relative_path[:100] if relative_path else None)
 
