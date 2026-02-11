@@ -21,6 +21,11 @@ class SectionBudget:
     priority: int
     overflow_strategy: Literal["truncate", "summarize", "drop"] = "truncate"
     header_template: str = "## {name}"
+    max_tokens: int = 0  # T-09: Token-based budget (0 = use max_chars / 4)
+
+    def effective_max_tokens(self) -> int:
+        """Get effective token budget (explicit or derived from chars)."""
+        return self.max_tokens if self.max_tokens > 0 else self.max_chars // 4
 
 TIER_BUDGETS: Dict[str, Dict[str, SectionBudget]] = {
     "axel": {
@@ -66,6 +71,23 @@ TIER_BUDGETS: Dict[str, Dict[str, SectionBudget]] = {
             overflow_strategy="truncate",
             header_template="## {name}"
         ),
+        # T-09: New 6-layer sections
+        "event_buffer": SectionBudget(
+            name="이벤트 버퍼",
+            max_chars=800,
+            priority=2,
+            overflow_strategy="truncate",
+            header_template="## {name}",
+            max_tokens=200,
+        ),
+        "meta_memory": SectionBudget(
+            name="메타 메모리",
+            max_chars=600,
+            priority=2,
+            overflow_strategy="truncate",
+            header_template="## {name}",
+            max_tokens=150,
+        ),
     },
 }
 
@@ -110,7 +132,13 @@ class ContextOptimizer:
             self._stats["sections_dropped"] += 1
             return ""
 
-        if len(content) <= budget.max_chars:
+        # T-09: Token-based budget check (chars // 4 as token approximation)
+        effective_limit = budget.max_chars
+        if budget.max_tokens > 0:
+            token_limit_chars = budget.max_tokens * 4
+            effective_limit = min(effective_limit, token_limit_chars)
+
+        if len(content) <= effective_limit:
             return content
 
         if budget.overflow_strategy == "truncate":

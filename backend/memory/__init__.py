@@ -14,6 +14,8 @@ from .permanent import (
 from .unified import MemoryManager
 from .memgpt import MemGPTManager, MemGPTConfig, ScoredMemory, SemanticKnowledge
 from .graph_rag import GraphRAG, KnowledgeGraph, Entity, Relation, GraphQueryResult
+from .event_buffer import EventBuffer, EventType, StreamEvent
+from .meta_memory import MetaMemory
 
 __all__ = [
     # Working memory
@@ -44,4 +46,10 @@ __all__ = [
     "Entity",
     "Relation",
     "GraphQueryResult",
+    # M0: Event Buffer
+    "EventBuffer",
+    "EventType",
+    "StreamEvent",
+    # M5: Meta Memory
+    "MetaMemory",
 ]

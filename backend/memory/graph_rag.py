@@ -1,13 +1,23 @@
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Any
+from typing import Dict, List, Optional, Set, Any, Tuple
 from collections import defaultdict
 from backend.core.logging import get_logger
 from backend.config import KNOWLEDGE_GRAPH_PATH, MEMORY_EXTRACTION_TIMEOUT
 from backend.core.utils.timezone import now_vancouver
 
 _log = get_logger("memory.graph")
+
+# T-06: Hybrid NER — graceful spaCy import
+try:
+    import spacy
+    _nlp = spacy.load("en_core_web_sm")
+    _HAS_SPACY = True
+except (ImportError, OSError):
+    _nlp = None
+    _HAS_SPACY = False
+    _log.debug("spaCy not available, using LLM-only extraction")
 
 
 @dataclass(frozen=True)
@@ -88,6 +98,11 @@ class KnowledgeGraph:
         self._native_adjacency: Dict[int, list[int]] = {}
         self._native_index_dirty: bool = True
 
+        # T-08: Co-occurrence tracking for TF-IDF relation weights
+        from collections import Counter as _Counter
+        self._cooccurrence: Dict[tuple, int] = defaultdict(int)  # (src, tgt) sorted pair → count
+        self._entity_mentions: _Counter = _Counter()  # entity_id → total message mentions
+
         self._load()
 
     def add_entity(self, entity: Entity) -> str:
@@ -131,7 +146,12 @@ class KnowledgeGraph:
 
         if relation.id in self.relations:
             existing = self.relations[relation.id]
-            existing.weight += 0.1
+            # T-08: Track co-occurrence instead of naive +0.1
+            pair = tuple(sorted([relation.source_id, relation.target_id]))
+            self._cooccurrence[pair] += 1
+            self._entity_mentions[relation.source_id] += 1
+            self._entity_mentions[relation.target_id] += 1
+            existing.weight += 0.1  # Keep naive increment as baseline until recalculate
             return existing.id
 
         relation.created_at = now_vancouver().isoformat()
@@ -243,6 +263,48 @@ class KnowledgeGraph:
             if r.source_id == entity_id or r.target_id == entity_id
         ]
 
+    def recalculate_weights(self) -> Dict[str, int]:
+        """Recalculate relation weights using TF-IDF scoring.
+
+        Formula:
+            TF = pair_count / source_msg_count
+            IDF = ln(total_entities / (1 + source_cooccur_count))
+            weight = 0.7 * TF * IDF + 0.3 * baseline
+
+        Returns:
+            Dict with 'total' and 'changed' counts
+        """
+        import math
+        import time as _time
+
+        t0 = _time.monotonic()
+        total_entities = max(len(self.entities), 1)
+        changed = 0
+
+        for rel_id, rel in self.relations.items():
+            pair = tuple(sorted([rel.source_id, rel.target_id]))
+            pair_count = self._cooccurrence.get(pair, 1)
+            source_total = max(self._entity_mentions.get(rel.source_id, 1), 1)
+            source_cooccur = len([p for p in self._cooccurrence if rel.source_id in p])
+
+            tf = pair_count / source_total
+            idf = math.log(total_entities / (1 + source_cooccur))
+            baseline = rel.weight
+            new_weight = max(0.0, min(1.0, 0.7 * tf * idf + 0.3 * baseline))
+
+            if abs(new_weight - rel.weight) > 0.001:
+                rel.weight = new_weight
+                changed += 1
+
+        dur_ms = int((_time.monotonic() - t0) * 1000)
+        _log.info(
+            "Relation weights recalculated",
+            relations=len(self.relations),
+            changed=changed,
+            dur_ms=dur_ms,
+        )
+        return {"total": len(self.relations), "changed": changed}
+
     def find_path(self, source_id: str, target_id: str, max_depth: int = 3) -> List[str]:
         """Find shortest path between two entities using BFS."""
         if source_id not in self.entities or target_id not in self.entities:
@@ -311,7 +373,12 @@ class KnowledgeGraph:
                     "created_at": v.created_at
                 }
                 for k, v in self.relations.items()
-            }
+            },
+            # T-08: Persist co-occurrence data for TF-IDF
+            "cooccurrence": {
+                f"{k[0]}|{k[1]}": v for k, v in self._cooccurrence.items()
+            },
+            "entity_mentions": dict(self._entity_mentions),
         }
 
         with open(self.persist_path, 'w', encoding='utf-8') as f:
@@ -337,6 +404,14 @@ class KnowledgeGraph:
                 self.relations[k] = rel
                 self.adjacency[rel.source_id].add(rel.target_id)
                 self.adjacency[rel.target_id].add(rel.source_id)
+
+            # T-08: Load co-occurrence data
+            from collections import Counter as _Counter
+            for k_str, v in data.get("cooccurrence", {}).items():
+                parts = k_str.split("|", 1)
+                if len(parts) == 2:
+                    self._cooccurrence[tuple(parts)] = v
+            self._entity_mentions = _Counter(data.get("entity_mentions", {}))
 
             self._native_index_dirty = True
             _log.debug("MEM graph_load", entities=len(self.entities), rels=len(self.relations))
@@ -367,6 +442,63 @@ class GraphRAG:
         self.config = config or GraphRAGConfig()
 
     EXTRACTION_TIMEOUT_SECONDS = MEMORY_EXTRACTION_TIMEOUT
+    MIN_TEXT_LENGTH_FOR_LLM = 200
+
+    # T-06: NER type mapping (spaCy label → our entity_type)
+    _NER_TYPE_MAP = {
+        "PERSON": "person",
+        "ORG": "project",
+        "GPE": "concept",
+        "LOC": "concept",
+        "PRODUCT": "tool",
+        "WORK_OF_ART": "concept",
+        "EVENT": "concept",
+        "LANGUAGE": "tool",
+    }
+
+    def _map_ner_type(self, label: str) -> str:
+        """Map spaCy NER label to our entity type."""
+        return self._NER_TYPE_MAP.get(label, "concept")
+
+    def _extract_ner(self, text: str) -> Tuple[List[dict], float]:
+        """NER baseline extraction using spaCy.
+
+        Returns:
+            Tuple of (entities list, average confidence)
+        """
+        if not _HAS_SPACY or _nlp is None:
+            return [], 0.0
+
+        doc = _nlp(text[:1000])
+        entities = []
+        total_conf = 0.0
+        seen_names = set()
+        for ent in doc.ents:
+            name = ent.text.strip()
+            if not name or name.lower() in seen_names:
+                continue
+            seen_names.add(name.lower())
+            entity = {
+                "name": name,
+                "type": self._map_ner_type(ent.label_),
+                "importance": 0.7,
+                "confidence": 0.85,
+            }
+            entities.append(entity)
+            total_conf += entity["confidence"]
+        avg_conf = total_conf / len(entities) if entities else 0.0
+        return entities, avg_conf
+
+    def _merge_ner_llm(
+        self, ner_entities: List[dict], llm_entities: List[dict]
+    ) -> List[dict]:
+        """Merge NER and LLM entities. LLM overrides NER on name match."""
+        llm_name_map = {e["name"].lower(): e for e in llm_entities}
+        merged = list(llm_entities)  # LLM entities take priority
+        for ner_e in ner_entities:
+            if ner_e["name"].lower() not in llm_name_map:
+                merged.append(ner_e)
+        return merged
 
     async def extract_and_store(
         self,
@@ -392,6 +524,56 @@ class GraphRAG:
         if importance_threshold is None:
             importance_threshold = self.config.importance_threshold
         timeout = timeout_seconds or self.EXTRACTION_TIMEOUT_SECONDS
+
+        # T-06: Hybrid NER — Step 1: NER baseline
+        ner_entities, ner_confidence = self._extract_ner(text)
+
+        # T-06: Decision gate — skip LLM for short text with high NER confidence
+        needs_llm = (
+            len(text) >= self.MIN_TEXT_LENGTH_FOR_LLM
+            or ner_confidence < 0.8
+            or not ner_entities
+        )
+
+        if not needs_llm and ner_entities:
+            # NER-only fast path
+            _log.info(
+                "Entity extraction",
+                mode="ner_only",
+                entities_found=len(ner_entities),
+                llm_skipped=True,
+            )
+            added_entities = []
+            for e in ner_entities:
+                if float(e.get("importance", 0.5)) < importance_threshold:
+                    continue
+                entity_id = e["name"].lower().replace(" ", "_")
+                entity = Entity(
+                    id=entity_id,
+                    name=e["name"],
+                    entity_type=e.get("type", "concept"),
+                    properties={"importance": float(e.get("importance", 0.7))},
+                )
+                self.graph.add_entity(entity)
+                added_entities.append(entity_id)
+            if added_entities:
+                self.graph.save()
+            return {
+                "entities_added": len(added_entities),
+                "entities_filtered": len(ner_entities) - len(added_entities),
+                "relations_added": 0,
+                "entities": added_entities,
+                "relations": [],
+                "extraction_mode": "ner_only",
+            }
+
+        # Hybrid / LLM path
+        _log.info(
+            "Entity extraction",
+            mode="hybrid" if ner_entities else "llm_only",
+            ner_entities=len(ner_entities),
+            llm_skipped=False,
+        )
 
         prompt = f"""당신은 Axel, Mark(종민)의 AI 시스템 관리자입니다.
 Mark는 Vancouver에 거주하는 UBC 편입 준비 중인 개발자이며, Northprot이라는
@@ -440,8 +622,13 @@ JSON 응답만 (설명 없이):
             filtered_entities = []
             added_relations = []
 
+            # T-06: Merge NER results with LLM results
+            llm_entities = data.get("entities", [])
+            if ner_entities:
+                llm_entities = self._merge_ner_llm(ner_entities, llm_entities)
+
             entity_map = {}
-            for e in data.get("entities", []):
+            for e in llm_entities:
                 importance = float(e.get("importance", 0.5))
 
                 if importance < importance_threshold:

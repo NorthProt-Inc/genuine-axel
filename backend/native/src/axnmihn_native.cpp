@@ -30,6 +30,7 @@ PYBIND11_MODULE(axnmihn_native, m) {
         .def_readwrite("min_retention", &axnmihn::decay::DecayConfig::min_retention)
         .def_readwrite("access_stability_k", &axnmihn::decay::DecayConfig::access_stability_k)
         .def_readwrite("relation_resistance_k", &axnmihn::decay::DecayConfig::relation_resistance_k)
+        .def_readwrite("channel_diversity_k", &axnmihn::decay::DecayConfig::channel_diversity_k)
         .def("set_type_multipliers", [](axnmihn::decay::DecayConfig& self,
                                         double conv, double fact, double pref, double insight) {
             self.type_multipliers[0] = conv;
@@ -41,20 +42,23 @@ PYBIND11_MODULE(axnmihn_native, m) {
     py::class_<axnmihn::decay::DecayInput>(decay_m, "DecayInput")
         .def(py::init<>())
         .def(py::init([](double importance, double hours_passed, int access_count,
-                        int connection_count, double last_access_hours, int memory_type) {
+                        int connection_count, double last_access_hours, int memory_type,
+                        int channel_mentions) {
             return axnmihn::decay::DecayInput{
                 importance, hours_passed, access_count,
-                connection_count, last_access_hours, memory_type
+                connection_count, last_access_hours, memory_type, channel_mentions
             };
         }), py::arg("importance"), py::arg("hours_passed"),
            py::arg("access_count") = 0, py::arg("connection_count") = 0,
-           py::arg("last_access_hours") = -1.0, py::arg("memory_type") = 0)
+           py::arg("last_access_hours") = -1.0, py::arg("memory_type") = 0,
+           py::arg("channel_mentions") = 0)
         .def_readwrite("importance", &axnmihn::decay::DecayInput::importance)
         .def_readwrite("hours_passed", &axnmihn::decay::DecayInput::hours_passed)
         .def_readwrite("access_count", &axnmihn::decay::DecayInput::access_count)
         .def_readwrite("connection_count", &axnmihn::decay::DecayInput::connection_count)
         .def_readwrite("last_access_hours", &axnmihn::decay::DecayInput::last_access_hours)
-        .def_readwrite("memory_type", &axnmihn::decay::DecayInput::memory_type);
+        .def_readwrite("memory_type", &axnmihn::decay::DecayInput::memory_type)
+        .def_readwrite("channel_mentions", &axnmihn::decay::DecayInput::channel_mentions);
 
     decay_m.def("calculate", &axnmihn::decay::calculate,
         "Calculate decayed importance for a single memory",
@@ -72,6 +76,7 @@ PYBIND11_MODULE(axnmihn_native, m) {
            py::array_t<int> connection_count,
            py::array_t<double> last_access_hours,
            py::array_t<int> memory_type,
+           py::array_t<int> channel_mentions,
            const axnmihn::decay::DecayConfig& config) {
 
             auto imp = importance.unchecked<1>();
@@ -80,6 +85,7 @@ PYBIND11_MODULE(axnmihn_native, m) {
             auto conn = connection_count.unchecked<1>();
             auto last = last_access_hours.unchecked<1>();
             auto mtype = memory_type.unchecked<1>();
+            auto chmnt = channel_mentions.unchecked<1>();
 
             size_t n = imp.size();
 
@@ -95,6 +101,7 @@ PYBIND11_MODULE(axnmihn_native, m) {
                 conn.data(0),
                 last.data(0),
                 mtype.data(0),
+                chmnt.data(0),
                 config,
                 output.mutable_data(0)
             );
@@ -108,6 +115,7 @@ PYBIND11_MODULE(axnmihn_native, m) {
         py::arg("connection_count"),
         py::arg("last_access_hours"),
         py::arg("memory_type"),
+        py::arg("channel_mentions"),
         py::arg("config"));
 
     // ====================

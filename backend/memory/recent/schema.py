@@ -8,7 +8,7 @@ from backend.memory.recent.connection import SQLiteConnectionManager
 _log = get_logger("memory.recent.schema")
 
 # Bump this when adding a new migration step.
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 class SchemaManager:
@@ -40,10 +40,10 @@ class SchemaManager:
                 self._create_initial_schema(conn)
                 self._set_version(conn, 1)
 
-            # Future migrations go here:
-            # if current < 2:
-            #     self._migrate_v1_to_v2(conn)
-            #     self._set_version(conn, 2)
+            # v1 → v2: user_behavior_metrics + access_patterns tables
+            if current < 2:
+                self._migrate_v1_to_v2(conn)
+                self._set_version(conn, 2)
 
             conn.commit()
             _log.debug(
@@ -157,3 +157,37 @@ class SchemaManager:
             CREATE INDEX IF NOT EXISTS idx_archived_session
             ON archived_messages(session_id)
         """)
+
+    def _migrate_v1_to_v2(self, conn: sqlite3.Connection):
+        """v1→v2: Add user_behavior_metrics and access_patterns tables."""
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_behavior_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT UNIQUE NOT NULL,
+                hourly_activity_rate TEXT NOT NULL DEFAULT '[]',
+                avg_latency_ms REAL DEFAULT 1000.0,
+                tool_usage_frequency REAL DEFAULT 0.0,
+                session_duration_avg REAL DEFAULT 600.0,
+                daily_active_hours REAL DEFAULT 4.0,
+                peak_hours TEXT DEFAULT '[]',
+                engagement_score REAL DEFAULT 0.5,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS access_patterns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query_text TEXT,
+                matched_memory_ids TEXT,
+                relevance_scores TEXT,
+                channel_id TEXT DEFAULT 'default',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_access_patterns_created
+            ON access_patterns(created_at DESC)
+        """)
+
+        _log.info("Migrated schema v1 → v2 (user_behavior_metrics, access_patterns)")

@@ -1,5 +1,6 @@
 import asyncio
 import threading
+import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from backend.core.utils.timezone import VANCOUVER_TZ
@@ -23,6 +24,8 @@ from .recent import SessionArchive
 from .permanent import LongTermMemory, LegacyMemoryMigrator
 from .memgpt import MemGPTManager, MemGPTConfig
 from .graph_rag import GraphRAG, KnowledgeGraph
+from .event_buffer import EventBuffer, EventType, StreamEvent
+from .meta_memory import MetaMemory
 
 SESSION_SUMMARY_PROMPT = """
 다음 대화를 분석하고 요약해주세요.
@@ -91,6 +94,11 @@ class MemoryManager:
         self.knowledge_graph = KnowledgeGraph()
         self.graph_rag = GraphRAG(client=client, model_name=self.model_name, graph=self.knowledge_graph)
 
+        # M0: Event Buffer (session-scoped, in-memory)
+        self.event_buffer = EventBuffer()
+        # M5: Meta Memory (access pattern tracking)
+        self.meta_memory = MetaMemory()
+
         self._write_lock = threading.Lock()
         self._read_semaphore = threading.Semaphore(5)
 
@@ -120,6 +128,13 @@ class MemoryManager:
         with self._write_lock:
             msg = self.working.add(role, content, emotional_context)
 
+            # M0: Push message event to event buffer
+            if msg:
+                self.event_buffer.push(StreamEvent(
+                    type=EventType.MESSAGE_RECEIVED,
+                    metadata={"role": role, "content_preview": content[:50]},
+                ))
+
             # 매 턴 SQL 저장 추가
             if msg and self.session_archive:
                 try:
@@ -145,13 +160,25 @@ class MemoryManager:
     ) -> str:
         """Build intelligent context from all memory sources.
 
+        Tries async parallel fetch first; falls back to sync sequential.
+
         Args:
             current_query: Current user query for relevance scoring
 
         Returns:
             Formatted context string with time, working, long-term, and graph data
         """
-        return self._build_smart_context_sync(current_query)
+        t0 = time.monotonic()
+        try:
+            asyncio.get_running_loop()
+            # Already inside an event loop — sync fallback
+            result = self._build_smart_context_sync(current_query)
+        except RuntimeError:
+            # No running loop — use async parallel version
+            result = asyncio.run(self._build_smart_context_async(current_query))
+        dur_ms = int((time.monotonic() - t0) * 1000)
+        _log.info("Context build done", sources=result.count("##"), dur_ms=dur_ms)
+        return result
 
     def _build_smart_context_sync(self, current_query: str) -> str:
 
@@ -217,6 +244,122 @@ class MemoryManager:
                         context_parts.append(f"## 관계 기반 지식\n{graph_result.context}")
             except Exception as e:
                 _log.debug("GraphRAG query skipped (sync)", error=str(e))
+
+        # M0: Event buffer context (recent events)
+        recent_events = self.event_buffer.get_recent(5)
+        if recent_events:
+            event_lines = [
+                f"- [{e.type.value}] {e.timestamp.strftime('%H:%M')}"
+                for e in recent_events
+            ]
+            context_parts.append(f"## 이벤트 버퍼 (최근 {len(recent_events)}개)\n" + "\n".join(event_lines))
+
+        # M5: Meta memory context (hot memories)
+        hot_memories = self.meta_memory.get_hot_memories(limit=5)
+        if hot_memories:
+            hot_lines = [
+                f"- {hm['memory_id'][:8]}... (접근 {hm['access_count']}회, 채널 {hm['channel_diversity']}개)"
+                for hm in hot_memories
+            ]
+            context_parts.append(f"## 메타 메모리 (핫 {len(hot_memories)}개)\n" + "\n".join(hot_lines))
+
+        context_text = "\n\n".join(context_parts)
+        context_text = truncate_text(context_text, self.MAX_CONTEXT_TOKENS * 4)
+
+        return context_text
+
+    # ── Async fetch wrappers for parallel context assembly ───────────
+
+    async def _fetch_long_term(self, query: str, temporal_filter):
+        """Fetch long-term memories in a thread."""
+        return await asyncio.to_thread(
+            self.memgpt.context_budget_select,
+            query, self.LONG_TERM_BUDGET, None, temporal_filter,
+        )
+
+    async def _fetch_session_archive(self, query: str, temporal_filter):
+        """Fetch session archive in a thread."""
+        if temporal_filter:
+            filter_type = temporal_filter.get("type")
+            if filter_type == "exact":
+                from_date = temporal_filter.get("date")
+                return await asyncio.to_thread(
+                    self.session_archive.get_sessions_by_date,
+                    from_date, None, 5, self.SESSION_ARCHIVE_BUDGET,
+                )
+            elif filter_type == "range":
+                from_date = temporal_filter.get("from")
+                to_date = temporal_filter.get("to")
+                return await asyncio.to_thread(
+                    self.session_archive.get_sessions_by_date,
+                    from_date, to_date, 10, self.SESSION_ARCHIVE_BUDGET,
+                )
+        return await asyncio.to_thread(
+            self.session_archive.get_recent_summaries,
+            10, self.SESSION_ARCHIVE_BUDGET,
+        )
+
+    async def _fetch_graph_rag(self, query: str):
+        """Fetch graph RAG results in a thread."""
+        if not self.graph_rag:
+            return None
+        return await asyncio.to_thread(self.graph_rag.query_sync, query)
+
+    async def _build_smart_context_async(self, current_query: str) -> str:
+        """Build context with parallel fetches using asyncio.gather."""
+        context_parts = []
+
+        time_context = self._build_time_context()
+        if time_context:
+            context_parts.append(f"## 시간 컨텍스트\n{time_context}")
+
+        working_context = self.working.get_progressive_context()
+        if working_context:
+            context_parts.append(
+                f"## 현재 대화 (최근 {self.working.get_turn_count()}턴, Progressive)\n{working_context}"
+            )
+
+        if current_query:
+            from .temporal import parse_temporal_query
+            temporal_filter = parse_temporal_query(current_query)
+
+            # Parallel fetch of all three sources
+            results = await asyncio.gather(
+                self._fetch_long_term(current_query, temporal_filter),
+                self._fetch_session_archive(current_query, temporal_filter),
+                self._fetch_graph_rag(current_query),
+                return_exceptions=True,
+            )
+
+            lt_result, sa_result, gr_result = results
+
+            # Long-term memories
+            if not isinstance(lt_result, BaseException) and lt_result:
+                selected_memories, tokens_used = lt_result
+                if selected_memories:
+                    memory_lines = []
+                    for mem in selected_memories:
+                        score_str = f"[{mem.score:.2f}]" if mem.score else ""
+                        memory_lines.append(f"- {score_str} {mem.content[:200]}...")
+                    context_parts.append(
+                        f"## 관련 장기 기억 ({len(selected_memories)}개, {tokens_used} tokens)\n"
+                        + "\n".join(memory_lines)
+                    )
+            elif isinstance(lt_result, BaseException):
+                _log.warning("MemGPT selection failed (async)", error=str(lt_result))
+
+            # Session archive
+            if not isinstance(sa_result, BaseException) and sa_result:
+                if "최근 대화 기록이 없습니다" not in sa_result:
+                    context_parts.append(f"## 최근 세션 기록\n{sa_result}")
+            elif isinstance(sa_result, BaseException):
+                _log.debug("Session archive fetch failed (async)", error=str(sa_result))
+
+            # GraphRAG
+            if not isinstance(gr_result, BaseException) and gr_result and gr_result.context:
+                context_parts.append(f"## 관계 기반 지식\n{gr_result.context}")
+            elif isinstance(gr_result, BaseException):
+                _log.debug("GraphRAG query skipped (async)", error=str(gr_result))
 
         context_text = "\n\n".join(context_parts)
         context_text = truncate_text(context_text, self.MAX_CONTEXT_TOKENS * 4)
@@ -317,6 +460,13 @@ class MemoryManager:
                     importance=0.6,
                     source_session=session_id
                 )
+
+        # M0: Push session_end event and clear buffer
+        self.event_buffer.push(StreamEvent(
+            type=EventType.SESSION_END,
+            metadata={"session_id": session_id, "messages": len(messages)},
+        ))
+        self.event_buffer.clear()
 
         self.working.reset_session()
         self._last_session_end = datetime.now()

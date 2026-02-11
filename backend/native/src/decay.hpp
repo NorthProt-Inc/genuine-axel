@@ -16,6 +16,7 @@ struct DecayInput {
     int connection_count;    // Number of graph connections
     double last_access_hours;// Hours since last access (-1 if never)
     int memory_type;         // 0=conversation, 1=fact, 2=preference, 3=insight
+    int channel_mentions;    // T-02: Number of channels mentioning this memory
 };
 
 /**
@@ -26,6 +27,7 @@ struct DecayConfig {
     double min_retention = 0.1;
     double access_stability_k = 0.3;
     double relation_resistance_k = 0.1;
+    double channel_diversity_k = 0.2;  // T-02: Channel diversity factor
 
     // Memory type decay multipliers
     double type_multipliers[4] = {1.0, 0.3, 0.5, 0.7};  // conv, fact, pref, insight
@@ -82,6 +84,7 @@ void calculate_batch_arrays(
     const int* connection_count,
     const double* last_access_hours,
     const int* memory_type,
+    const int* channel_mentions,
     const DecayConfig& config,
     double* output
 );

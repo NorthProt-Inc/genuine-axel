@@ -1,7 +1,7 @@
 # Axnmihn Operations Guide
 
 > **환경:** Pop!_OS (Ubuntu 24.04 LTS) + Systemd
-> **대상:** Mark (종민)
+> **대상:** Cyan
 > **마지막 업데이트:** 2026-02-05
 
 ---

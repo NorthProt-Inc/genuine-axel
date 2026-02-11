@@ -35,5 +35,8 @@ class MemoryConfig:
     PRESERVE_REPETITIONS = 3
     EMBEDDING_MODEL = EMBEDDING_MODEL
 
+    # Channel diversity factor (T-02: axel port)
+    CHANNEL_DIVERSITY_K = 0.2
+
     # Embedding cache settings
     EMBEDDING_CACHE_SIZE = 256

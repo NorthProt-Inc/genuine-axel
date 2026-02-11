@@ -58,8 +58,11 @@ double calculate(const DecayInput& input, const DecayConfig& config) {
     int type_idx = std::clamp(input.memory_type, 0, 3);
     double type_multiplier = config.type_multipliers[type_idx];
 
+    // T-02: Channel diversity boost (more channels = slower decay)
+    double channel_boost = 1.0 / (1.0 + config.channel_diversity_k * input.channel_mentions);
+
     // Calculate effective decay rate
-    double effective_rate = config.base_decay_rate * type_multiplier / stability * (1.0 - resistance);
+    double effective_rate = config.base_decay_rate * type_multiplier * channel_boost / stability * (1.0 - resistance);
 
     // Apply exponential decay
     double decayed = input.importance * fast_exp_neg(effective_rate * input.hours_passed);
@@ -101,6 +104,7 @@ void calculate_batch_arrays(
     const int* connection_count,
     const double* last_access_hours,
     const int* memory_type,
+    const int* channel_mentions,
     const DecayConfig& config,
     double* output
 ) {
@@ -155,8 +159,16 @@ void calculate_batch_arrays(
         }
         __m256d tm = _mm256_loadu_pd(type_mult);
 
-        // effective_rate = base_rate * type_mult / stability * (1 - resistance)
+        // T-02: Channel diversity boost (scalar for simplicity)
+        double ch_boost[4];
+        for (int k = 0; k < 4; ++k) {
+            ch_boost[k] = 1.0 / (1.0 + config.channel_diversity_k * channel_mentions[i + k]);
+        }
+        __m256d cb = _mm256_loadu_pd(ch_boost);
+
+        // effective_rate = base_rate * type_mult * channel_boost / stability * (1 - resistance)
         __m256d eff_rate = _mm256_mul_pd(base_rate, tm);
+        eff_rate = _mm256_mul_pd(eff_rate, cb);
         eff_rate = _mm256_div_pd(eff_rate, stability);
         eff_rate = _mm256_mul_pd(eff_rate, _mm256_sub_pd(one, resistance));
 
@@ -203,7 +215,8 @@ void calculate_batch_arrays(
             access_count[i],
             connection_count[i],
             last_access_hours[i],
-            memory_type[i]
+            memory_type[i],
+            channel_mentions[i]
         };
         output[i] = calculate(input, config);
     }

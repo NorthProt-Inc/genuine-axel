@@ -93,7 +93,7 @@ class MemoryConsolidator:
                     _log.warning("Preserve update failed", error=str(e), id=doc_id)
 
             # Calculate decayed importance in batch
-            to_delete = self._calculate_deletions_batch(batch_data)
+            to_delete, decayed_values = self._calculate_deletions_batch(batch_data)
             report["deleted"] = len(to_delete)
 
             # Delete faded memories
@@ -101,10 +101,27 @@ class MemoryConsolidator:
                 self.repository.delete(to_delete)
                 _log.info("Deleted faded memories", count=len(to_delete))
 
+            # T-03: Update surviving memories' importance to decayed value
+            surviving_updates = self._get_surviving_updates(
+                batch_data, decayed_values, to_delete
+            )
+            if surviving_updates:
+                updated = 0
+                for doc_id, new_importance in surviving_updates:
+                    try:
+                        self.repository.update_metadata(
+                            doc_id, {"importance": new_importance}
+                        )
+                        updated += 1
+                    except Exception as e:
+                        _log.warning("Surviving update failed", error=str(e), id=doc_id)
+                report["surviving_updated"] = updated
+
             _log.info(
                 "MEM consolidate",
                 deleted=report["deleted"],
                 preserved=report["preserved"],
+                surviving_updated=report.get("surviving_updated", 0),
                 native=is_native_available(),
             )
 
@@ -117,17 +134,17 @@ class MemoryConsolidator:
     def _calculate_deletions_batch(
         self,
         batch_data: List[tuple],
-    ) -> List[str]:
+    ) -> tuple[List[str], List[float]]:
         """Calculate which memories should be deleted using batch processing.
 
         Args:
             batch_data: List of (index, doc_id, metadata) tuples
 
         Returns:
-            List of doc_ids to delete
+            Tuple of (doc_ids to delete, all decayed importance values)
         """
         if not batch_data:
-            return []
+            return [], []
 
         # Prepare batch input for decay calculator
         memories_for_decay = []
@@ -164,4 +181,30 @@ class MemoryConsolidator:
             ):
                 to_delete.append(doc_id)
 
-        return to_delete
+        return to_delete, decayed_values
+
+    def _get_surviving_updates(
+        self,
+        batch_data: List[tuple],
+        decayed_values: List[float],
+        to_delete: List[str],
+    ) -> List[tuple[str, float]]:
+        """Get surviving memories that need importance updates.
+
+        Args:
+            batch_data: List of (index, doc_id, metadata) tuples
+            decayed_values: Decayed importance for each batch item
+            to_delete: Doc IDs marked for deletion
+
+        Returns:
+            List of (doc_id, new_importance) tuples
+        """
+        if not batch_data or not decayed_values:
+            return []
+
+        delete_set = set(to_delete)
+        updates = []
+        for (_, doc_id, _metadata), decayed in zip(batch_data, decayed_values):
+            if doc_id not in delete_set:
+                updates.append((doc_id, decayed))
+        return updates

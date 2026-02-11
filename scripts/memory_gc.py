@@ -107,7 +107,7 @@ def _phase2_native(ltm, threshold: float) -> list[dict]:
         include=["documents", "metadatas", "embeddings"]
     )
 
-    if not results["ids"] or not results.get("embeddings"):
+    if not results["ids"] or results.get("embeddings") is None or len(results["embeddings"]) == 0:
         return []
 
     ids = results["ids"]
@@ -597,11 +597,8 @@ async def main_async(dry_run: bool = False):
         gc_errors.append({"phase": 6, "error": str(e), "traceback": traceback.format_exc()})
         episodic_report = {}
 
-    try:
-        persona_count, persona_insights = await phase7_persona_evolution(ltm)
-    except Exception as e:
-        gc_errors.append({"phase": 7, "error": str(e), "traceback": traceback.format_exc()})
-        persona_count, persona_insights = 0, []
+    # Phase 7: Persona evolution — 함수 주석 처리됨, 스킵
+    persona_count, persona_insights = 0, []
 
     try:
         sleep_learning_report = phase8_sleep_learning(persona_insights, dry_run=dry_run)

@@ -113,6 +113,7 @@ class AdaptiveDecayCalculator:
         connection_count: int = 0,
         last_accessed: str = None,
         memory_type: str = None,
+        channel_mentions: int = 0,
     ) -> float:
         """Calculate decayed importance score.
 
@@ -123,6 +124,7 @@ class AdaptiveDecayCalculator:
             connection_count: Number of graph connections
             last_accessed: ISO timestamp of last access
             memory_type: Memory category (fact, preference, insight, conversation)
+            channel_mentions: Number of distinct channels mentioning this memory
 
         Returns:
             Decayed importance score (never below MIN_RETENTION * original)
@@ -142,9 +144,12 @@ class AdaptiveDecayCalculator:
             # Type-specific decay rate
             type_multiplier = MEMORY_TYPE_DECAY_MULTIPLIERS.get(memory_type, 1.0)
 
+            # T-02: Channel diversity boost (more channels = slower decay)
+            channel_boost = 1.0 / (1 + self.config.CHANNEL_DIVERSITY_K * channel_mentions)
+
             # Calculate effective decay rate
             effective_rate = (
-                self.config.BASE_DECAY_RATE * type_multiplier / stability * (1 - resistance)
+                self.config.BASE_DECAY_RATE * type_multiplier * channel_boost / stability * (1 - resistance)
             )
 
             decayed = importance * math.exp(-effective_rate * hours_passed)
@@ -213,6 +218,7 @@ class AdaptiveDecayCalculator:
                 "connection_count": int(mem.get("connection_count", 0)),
                 "last_access_hours": last_access_hours,
                 "memory_type": type_to_int.get(mem.get("memory_type"), 0),
+                "channel_mentions": int(mem.get("channel_mentions", 0)),
             })
 
         # Use native implementation if available
@@ -244,6 +250,7 @@ class AdaptiveDecayCalculator:
         connection_count = np.array([d["connection_count"] for d in valid_data], dtype=np.int32)
         last_access_hours = np.array([d["last_access_hours"] for d in valid_data], dtype=np.float64)
         memory_type = np.array([d["memory_type"] for d in valid_data], dtype=np.int32)
+        channel_mentions = np.array([d.get("channel_mentions", 0) for d in valid_data], dtype=np.int32)
 
         # Create config
         config = _native.decay_ops.DecayConfig()
@@ -253,12 +260,24 @@ class AdaptiveDecayCalculator:
         config.relation_resistance_k = self.config.RELATION_RESISTANCE_K
         config.set_type_multipliers(1.0, 0.3, 0.5, 0.7)  # conv, fact, pref, insight
 
+        # T-02: Set channel diversity k if native module supports it
+        if hasattr(config, "channel_diversity_k"):
+            config.channel_diversity_k = self.config.CHANNEL_DIVERSITY_K
+
         # Call native batch function
-        results_arr = _native.decay_ops.calculate_batch_numpy(
-            importance, hours_passed, access_count,
-            connection_count, last_access_hours, memory_type,
-            config
-        )
+        try:
+            results_arr = _native.decay_ops.calculate_batch_numpy(
+                importance, hours_passed, access_count,
+                connection_count, last_access_hours, memory_type,
+                channel_mentions, config,
+            )
+        except TypeError:
+            # Fallback: native module not yet rebuilt with channel_mentions
+            results_arr = _native.decay_ops.calculate_batch_numpy(
+                importance, hours_passed, access_count,
+                connection_count, last_access_hours, memory_type,
+                config,
+            )
 
         # Map results back to original indices
         results = []
@@ -290,9 +309,13 @@ class AdaptiveDecayCalculator:
             type_multipliers = [1.0, 0.3, 0.5, 0.7]  # conv, fact, pref, insight
             type_multiplier = type_multipliers[p["memory_type"]]
 
+            # T-02: Channel diversity boost
+            channel_mentions = p.get("channel_mentions", 0)
+            channel_boost = 1.0 / (1 + self.config.CHANNEL_DIVERSITY_K * channel_mentions)
+
             # Effective decay rate
             effective_rate = (
-                self.config.BASE_DECAY_RATE * type_multiplier / stability * (1 - resistance)
+                self.config.BASE_DECAY_RATE * type_multiplier * channel_boost / stability * (1 - resistance)
             )
 
             # Apply decay

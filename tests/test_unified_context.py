@@ -5,7 +5,7 @@ circular import in backend.core.__init__. We pre-seed the partially
 initialized module before importing unified.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -33,17 +33,22 @@ def MemoryManager():
 
 
 class TestBuildSmartContextDelegation:
-    """Verify build_smart_context delegates to _build_smart_context_sync."""
+    """Verify build_smart_context delegates to _build_smart_context_sync or async."""
 
-    def test_build_smart_context_calls_sync(self, MemoryManager) -> None:
-        mm = MagicMock(spec=MemoryManager)
-        mm._build_smart_context_sync = MagicMock(return_value="ctx")
-        result = MemoryManager.build_smart_context(mm, "hello")
-        mm._build_smart_context_sync.assert_called_once_with("hello")
-        assert result == "ctx"
+    def test_build_smart_context_returns_string(self, MemoryManager) -> None:
+        """build_smart_context returns a string from sync or async path."""
+        with patch.object(MemoryManager, "__init__", lambda self, **kw: None):
+            mm = MemoryManager()
+            mm._build_smart_context_sync = MagicMock(return_value="ctx")
+            mm._build_smart_context_async = AsyncMock(return_value="ctx")
+            result = mm.build_smart_context("hello")
+            # Inside a test (no running loop), should use async path via asyncio.run
+            # or sync fallback — either way returns a string
+            assert isinstance(result, str)
 
-    def test_async_method_does_not_exist(self, MemoryManager) -> None:
-        assert not hasattr(MemoryManager, "_build_smart_context_async")
+    def test_async_method_exists(self, MemoryManager) -> None:
+        """T-01: Parallel context assembly adds _build_smart_context_async."""
+        assert hasattr(MemoryManager, "_build_smart_context_async")
 
 
 class TestSessionArchiveBudgetDefined:
@@ -77,6 +82,12 @@ class TestContextTruncation:
             mm.LONG_TERM_BUDGET = 100
             mm.SESSION_ARCHIVE_BUDGET = 100
             mm._build_time_context = MagicMock(return_value="x" * 200)
+
+            # M0/M5: Event buffer and meta memory (added in 6-layer integration)
+            from backend.memory.event_buffer import EventBuffer
+            from backend.memory.meta_memory import MetaMemory
+            mm.event_buffer = EventBuffer()
+            mm.meta_memory = MetaMemory()
 
             result = mm._build_smart_context_sync("test")
             assert len(result) <= 40

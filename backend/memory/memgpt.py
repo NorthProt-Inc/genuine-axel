@@ -2,6 +2,7 @@ import json
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from backend.core.logging import get_logger
+from backend.core.utils.timezone import now_vancouver
 
 _log = get_logger("memory.memgpt")
 
@@ -328,12 +329,35 @@ class MemGPTManager:
                     })
 
                     if not dry_run:
-                        self.long_term.add(
-                            content=f"[Semantic Knowledge] {semantic.knowledge}",
-                            memory_type="semantic",
-                            importance=0.8,
-                            force=True
+                        # T-04: Dedup check before storing semantic knowledge
+                        existing = self.long_term.find_similar_memories(
+                            semantic.knowledge, threshold=0.92
                         )
+                        if existing:
+                            # Merge: increment repetitions on existing memory
+                            best = existing[0]
+                            try:
+                                self.long_term._repository.update_metadata(
+                                    best["id"],
+                                    {
+                                        "repetitions": best["metadata"].get("repetitions", 1) + 1,
+                                        "last_accessed": now_vancouver().isoformat(),
+                                    },
+                                )
+                                _log.info(
+                                    "Dedup merged",
+                                    existing_id=best["id"][:8],
+                                    similarity=best.get("similarity", 0),
+                                )
+                            except Exception as e:
+                                _log.warning("Dedup merge failed", error=str(e))
+                        else:
+                            self.long_term.add(
+                                content=f"[Semantic Knowledge] {semantic.knowledge}",
+                                memory_type="semantic",
+                                importance=0.8,
+                                force=True
+                            )
 
             result = {
                 "total_groups": len(topic_groups),
