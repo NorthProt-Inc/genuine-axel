@@ -131,6 +131,18 @@ class MemoryRepositoryProtocol(Protocol):
         """
         ...
 
+    def batch_update_metadata(self, doc_ids: List[str], metadatas: List[Dict[str, Any]]) -> int:
+        """Batch update metadata for multiple documents.
+
+        Args:
+            doc_ids: List of document IDs
+            metadatas: List of metadata dicts (one per doc_id)
+
+        Returns:
+            Number of successfully updated documents
+        """
+        ...
+
 
 class DecayCalculatorProtocol(Protocol):
     """Protocol for memory importance decay calculation."""
