@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 from backend.core.logging import get_logger
 
-logger = get_logger("rate-limiter")
+_log = get_logger("rate-limiter")
 
 @dataclass
 class RateLimitConfig:
@@ -24,7 +24,7 @@ class TokenBucketRateLimiter:
 
         self._refill_rate = self.config.requests_per_minute / 60.0
 
-        logger.debug(
+        _log.debug(
             f"RateLimiter '{name}' initialized: "
             f"rate={self.config.requests_per_minute}/min, "
             f"burst={self.config.burst_size}"
@@ -44,7 +44,7 @@ class TokenBucketRateLimiter:
 
             elapsed = time.monotonic() - start_time
             if elapsed >= timeout:
-                logger.warning(
+                _log.warning(
                     f"RateLimiter '{self.name}' timeout after {elapsed:.1f}s"
                 )
                 return False

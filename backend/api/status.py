@@ -1,15 +1,18 @@
 import os
+import time
 from datetime import datetime
 from typing import Dict, Any
 from fastapi import APIRouter, Request, Depends
+from fastapi.responses import PlainTextResponse
 from backend.llm import get_all_providers, get_all_models, DEFAULT_PROVIDER
 from backend.api.deps import is_request_authorized, is_api_key_configured, get_state, require_api_key
 from backend.core import get_code_summary, list_source_files
 from backend.core.logging import get_logger
 from backend.config import APP_VERSION
 from backend.core.utils.timezone import VANCOUVER_TZ
+from backend.core.health.health_check import _START_TIME
 
-_logger = get_logger("api.status")
+_log = get_logger("api.status")
 
 router = APIRouter(tags=["Status"])
 
@@ -126,7 +129,7 @@ async def health_check():
     else:
         overall_status = "unhealthy"
 
-    _logger.info(
+    _log.info(
         "Health check",
         status=overall_status,
         issues=len(issues),
@@ -134,15 +137,28 @@ async def health_check():
         llms=len(available_llms),
     )
 
+    # Run health checker if available
+    checker_results = {}
+    if hasattr(state, "health_checker") and state.health_checker:
+        try:
+            checker_results = await state.health_checker.check_all()
+        except Exception:
+            pass
+
     return {
         "status": overall_status,
         "version": APP_VERSION,
         "timestamp": now.isoformat(),
+        "uptime_seconds": round(time.time() - _START_TIME, 1),
         "uptime_info": {
             "working_session": state.memory_manager.working.session_id[:8] if state.memory_manager and state.memory_manager.working.session_id else None,
             "turn_count": state.turn_count,
         },
         "modules": modules,
+        "component_checks": {
+            name: {"state": r.state.value, "latency_ms": round(r.latency_ms, 2), "message": r.message}
+            for name, r in checker_results.items()
+        } if checker_results else None,
         "api_keys": api_keys,
         "issues": issues if issues else None,
     }
@@ -163,6 +179,16 @@ async def health_quick():
         "memory": "ok" if memory_ok else "off",
         "llm": "ok" if llm_ok else "off",
     }
+
+@router.get("/metrics")
+async def metrics_endpoint():
+    state = get_state()
+    if state.metrics:
+        return PlainTextResponse(
+            content=state.metrics.format_all(),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
+    return PlainTextResponse(content="", media_type="text/plain")
 
 @router.get("/code/summary", dependencies=[Depends(require_api_key)])
 async def code_summary():

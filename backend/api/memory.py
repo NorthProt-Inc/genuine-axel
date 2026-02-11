@@ -4,7 +4,7 @@ from backend.llm import get_llm_client
 from backend.api.deps import get_state, require_api_key
 from datetime import datetime, timedelta
 
-_logger = get_logger("api.memory")
+_log = get_logger("api.memory")
 
 router = APIRouter(tags=["Memory"], dependencies=[Depends(require_api_key)])
 
@@ -75,7 +75,7 @@ async def _evolve_persona_from_memories():
         response = await llm.generate(prompt, max_tokens=300)
 
         if not response:
-            _logger.warning("LLM returned empty response for persona evolution")
+            _log.warning("LLM returned empty response for persona evolution")
             return 0, []
 
         insights = []
@@ -89,14 +89,14 @@ async def _evolve_persona_from_memories():
         if insights and state.identity_manager:
             added = await state.identity_manager.evolve(insights[:3])
             if added > 0:
-                _logger.info("AI Brain evolved", new_insights=added)
+                _log.info("AI Brain evolved", new_insights=added)
             return added, insights[:3]
 
         return 0, []
 
     except Exception as e:
         import traceback
-        _logger.error("AI Brain evolution error", error=str(e), traceback=traceback.format_exc())
+        _log.error("AI Brain evolution error", error=str(e), traceback=traceback.format_exc())
         return 0, []
 
 @router.get("/memory/stats")
@@ -120,10 +120,10 @@ async def end_session():
 
     try:
         result = await state.memory_manager.end_session()
-        _logger.info("Session ended", result=str(result))
+        _log.info("Session ended", result=str(result))
         return result
     except Exception as e:
-        _logger.error("Session end error", error=str(e))
+        _log.error("Session end error", error=str(e))
         return {"status": "error", "message": str(e)}
 
 @router.get("/memory/sessions")
@@ -139,7 +139,7 @@ async def get_sessions():
         summaries = state.memory_manager.session_archive.get_recent_summaries(limit=50)
         return {"sessions": summaries}
     except Exception as e:
-        _logger.error("Get sessions error", error=str(e))
+        _log.error("Get sessions error", error=str(e))
         return {"sessions": [], "error": str(e)}
 
 @router.get("/memory/search")
@@ -163,7 +163,7 @@ async def search_memory(query: str, limit: int = 20):
                     "score": item.get("similarity", 0)
                 })
         except Exception as e:
-            _logger.warning("ChromaDB search error", error=str(e))
+            _log.warning("ChromaDB search error", error=str(e))
 
     if state.memory_manager and state.memory_manager.session_archive:
         try:
@@ -187,7 +187,7 @@ async def search_memory(query: str, limit: int = 20):
                             "score": 0.5
                         })
         except Exception as e:
-            _logger.warning("Session search error", error=str(e))
+            _log.warning("Session search error", error=str(e))
 
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
 
@@ -222,7 +222,7 @@ async def get_session_detail(session_id: str):
             "messages": messages
         }
     except Exception as e:
-        _logger.error("Get session detail error", error=str(e))
+        _log.error("Get session detail error", error=str(e))
         return {"error": str(e)}
 
 
@@ -238,7 +238,7 @@ async def get_interaction_logs(limit: int = 20):
         logs = state.memory_manager.session_archive.get_recent_interaction_logs(limit)
         return {"logs": logs, "count": len(logs)}
     except Exception as e:
-        _logger.error("Get interaction logs error", error=str(e))
+        _log.error("Get interaction logs error", error=str(e))
         return {"logs": [], "error": str(e)}
 
 
@@ -253,5 +253,5 @@ async def get_interaction_stats():
     try:
         return state.memory_manager.session_archive.get_interaction_stats()
     except Exception as e:
-        _logger.error("Get interaction stats error", error=str(e))
+        _log.error("Get interaction stats error", error=str(e))
         return {"error": str(e)}

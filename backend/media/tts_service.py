@@ -23,7 +23,7 @@ from backend.core.logging import get_logger
 from backend.core.utils.lazy import Lazy
 from backend.media.tts_utils import clean_text_for_tts, convert_wav_to_mp3
 
-_logger = get_logger("media.tts_service")
+_log = get_logger("media.tts_service")
 
 _tts_manager = None
 
@@ -50,11 +50,11 @@ async def lifespan(app: FastAPI):
 
     global _tts_manager
     _tts_manager = TTSManager(idle_timeout=TTS_IDLE_TIMEOUT)
-    _logger.info("TTS service starting", idle_timeout=TTS_IDLE_TIMEOUT)
+    _log.info("TTS service starting", idle_timeout=TTS_IDLE_TIMEOUT)
 
     yield
 
-    _logger.info("TTS service shutting down")
+    _log.info("TTS service shutting down")
     if _tts_manager:
         await asyncio.wait_for(_tts_manager.shutdown(), timeout=10.0)
 
@@ -112,12 +112,12 @@ async def synthesize_speech(request: SpeechRequest, raw_request: Request):
     except QueueFullError:
         raise HTTPException(status_code=429, detail="TTS queue full, try again later")
     except asyncio.TimeoutError:
-        _logger.warning("TTS synthesis timeout", timeout=TTS_SYNTHESIS_TIMEOUT)
+        _log.warning("TTS synthesis timeout", timeout=TTS_SYNTHESIS_TIMEOUT)
         raise HTTPException(status_code=504, detail="TTS synthesis timed out")
     except HTTPException:
         raise
     except Exception as e:
-        _logger.error("TTS synthesis error", error=str(e))
+        _log.error("TTS synthesis error", error=str(e))
         raise HTTPException(status_code=500, detail=f"TTS error: {str(e)}")
 
 
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 8002
 
-    _logger.info("TTS service launching", host=host, port=port)
+    _log.info("TTS service launching", host=host, port=port)
 
     uvicorn.run(
         "backend.media.tts_service:app",

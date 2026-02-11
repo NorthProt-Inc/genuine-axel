@@ -6,6 +6,7 @@ from .mcp import router as mcp_router
 from .media import router as media_router
 from .openai import router as openai_router
 from .audio import router as audio_router
+from .websocket import router as websocket_router
 
 __all__ = [
 
@@ -20,4 +21,5 @@ __all__ = [
     'media_router',
     'openai_router',
     'audio_router',
+    'websocket_router',
 ]

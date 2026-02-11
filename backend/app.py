@@ -5,7 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import asyncio
 import os
+import time
 import traceback  # PERF-041: Import at module level instead of in exception handler
+from typing import Optional
 from uuid import uuid4
 from backend.core.utils.gemini_client import get_gemini_client
 from backend.config import (
@@ -16,18 +18,18 @@ from backend.config import (
     SHUTDOWN_TASK_TIMEOUT,
     get_cors_origins,
     APP_VERSION,
-    PERSONA_PATH,
     DEFAULT_GEMINI_MODEL,
     ensure_data_directories,
     DATABASE_URL,
     PG_POOL_MIN,
     PG_POOL_MAX,
 )
-from backend.core import IdentityManager
 from backend.memory import MemoryManager
 from backend.llm import get_all_providers
 from backend.core.logging import get_logger, set_request_id, reset_request_id, get_request_id
-_log = get_logger("app")
+from backend.core.telemetry.metrics import MetricsRegistry
+from backend.core.errors import AxnmihnError
+from backend.core.health.health_check import HealthChecker, HealthResult, HealthState
 from backend.api import (
     init_state,
     get_state,
@@ -38,7 +40,9 @@ from backend.api import (
     media_router,
     openai_router,
     audio_router,
+    websocket_router,
 )
+_log = get_logger("app")
 
 
 @asynccontextmanager
@@ -50,6 +54,9 @@ async def lifespan(app: FastAPI):
     state = get_state()
     state.shutdown_event = asyncio.Event()
     state.background_tasks = []
+
+    # Periodic consolidation task handle
+    consolidation_task: Optional[asyncio.Task] = None
 
     app.state.shutting_down = False
 
@@ -119,6 +126,39 @@ async def lifespan(app: FastAPI):
     state.memory_manager = mm
     state.long_term_memory = ltm
 
+    # Initialize metrics registry
+    _metrics = MetricsRegistry()
+    _metrics.counter("http_requests_total", "Total HTTP requests")
+    _metrics.histogram("http_request_duration_seconds", "HTTP request duration")
+    _metrics.counter("http_errors_total", "Total HTTP errors")
+    state.metrics = _metrics
+
+    # Initialize health checker with component checks
+    _checker = HealthChecker()
+
+    async def _check_memory() -> HealthResult:
+        if state.memory_manager:
+            return HealthResult(HealthState.HEALTHY, 0.0, "memory ok")
+        return HealthResult(HealthState.UNHEALTHY, 0.0, "memory not initialized")
+
+    async def _check_llm() -> HealthResult:
+        avail = [p for p in get_all_providers() if p.get("available")]
+        if avail:
+            return HealthResult(HealthState.HEALTHY, 0.0, f"{len(avail)} providers")
+        return HealthResult(HealthState.UNHEALTHY, 0.0, "no providers")
+
+    async def _check_pg() -> HealthResult:
+        if pg_conn_mgr and pg_conn_mgr.health_check():
+            return HealthResult(HealthState.HEALTHY, 0.0, "pg ok")
+        if pg_conn_mgr:
+            return HealthResult(HealthState.UNHEALTHY, 0.0, "pg health check failed")
+        return HealthResult(HealthState.DEGRADED, 0.0, "pg not configured")
+
+    _checker.register("memory", _check_memory)
+    _checker.register("llm", _check_llm)
+    _checker.register("postgresql", _check_pg)
+    state.health_checker = _checker
+
     available_llms = [p['name'] for p in get_all_providers() if p['available']]
     env = os.getenv("ENV", "dev")
     _log.info(
@@ -137,7 +177,30 @@ async def lifespan(app: FastAPI):
         )
     _log.info("APP ready", host=HOST, port=PORT)
 
+    # Start periodic consolidation background task
+    async def _periodic_consolidation() -> None:
+        """Run memory consolidation every 6 hours."""
+        while True:
+            await asyncio.sleep(6 * 3600)
+            if ltm:
+                try:
+                    result = await asyncio.to_thread(ltm.consolidate_memories)
+                    _log.info("APP consolidation done", result=result)
+                except Exception as e:
+                    _log.warning("APP consolidation failed", error=str(e))
+
+    if ltm:
+        consolidation_task = asyncio.create_task(_periodic_consolidation())
+
     yield
+
+    # Cancel consolidation task
+    if consolidation_task and not consolidation_task.done():
+        consolidation_task.cancel()
+        try:
+            await asyncio.wait_for(consolidation_task, timeout=1.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
 
     _log.info("APP shutdown", reason="lifespan_end")
 
@@ -166,10 +229,11 @@ async def lifespan(app: FastAPI):
         try:
             await asyncio.wait_for(
                 state.memory_manager.end_session(
-                    allow_llm_summary=False,
-                    allow_fallback_summary=True
+                    allow_llm_summary=True,
+                    allow_fallback_summary=True,
+                    summary_timeout_seconds=10.0,
                 ),
-                timeout=SHUTDOWN_SESSION_TIMEOUT,
+                timeout=SHUTDOWN_SESSION_TIMEOUT + 10.0,
             )
         except Exception as e:
             _log.warning("APP session save failed", error=str(e))
@@ -222,10 +286,20 @@ async def request_id_middleware(request: Request, call_next):
     )
     request.state.request_id = req_id
     token = set_request_id(req_id)
+    t0 = time.perf_counter()
     try:
         response = await call_next(request)
     finally:
         reset_request_id(token)
+        elapsed = time.perf_counter() - t0
+        _state = get_state()
+        if _state.metrics:
+            req_counter = _state.metrics._metrics.get("http_requests_total")
+            if req_counter:
+                req_counter.inc()
+            dur_hist = _state.metrics._metrics.get("http_request_duration_seconds")
+            if dur_hist:
+                dur_hist.observe(elapsed)
     response.headers["X-Request-ID"] = req_id
     return response
 
@@ -245,14 +319,15 @@ app.include_router(mcp_router)
 app.include_router(media_router)
 app.include_router(openai_router)
 app.include_router(audio_router)
+app.include_router(websocket_router)
 _log.debug(
     "APP routers mounted",
-    routers=["status", "chat", "memory", "mcp", "media", "openai", "audio"]
+    routers=["status", "chat", "memory", "mcp", "media", "openai", "audio", "websocket"]
 )
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Handle all unhandled exceptions."""
+    """Handle all unhandled exceptions with structured error hierarchy."""
     req_id = getattr(request.state, "request_id", None) or get_request_id()
 
     tb = traceback.format_exc()
@@ -265,7 +340,29 @@ async def global_exception_handler(request: Request, exc: Exception):
         request_id=req_id
     )
 
+    # Record error metric
+    _state = get_state()
+    if _state.metrics:
+        err_counter = _state.metrics._metrics.get("http_errors_total")
+        if err_counter:
+            err_counter.inc()
+
     headers = {"X-Request-ID": req_id} if req_id else None
+
+    if isinstance(exc, AxnmihnError):
+        return JSONResponse(
+            status_code=exc.http_status,
+            headers=headers,
+            content={
+                "error": type(exc).__name__,
+                "code": exc.code,
+                "message": exc.message,
+                "is_retryable": exc.is_retryable,
+                "path": str(request.url.path),
+                "request_id": req_id,
+            }
+        )
+
     return JSONResponse(
         status_code=500,
         headers=headers,

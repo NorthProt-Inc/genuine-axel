@@ -44,7 +44,7 @@ class TestShortTextNerOnly:
             {"name": "Alice", "type": "person", "importance": 0.8, "confidence": 0.9},
             {"name": "Vancouver", "type": "concept", "importance": 0.7, "confidence": 0.85},
         ]
-        rag._extract_ner = MagicMock(return_value=(ner_entities, 0.875))
+        rag._extractor._extract_ner = MagicMock(return_value=(ner_entities, 0.875))
 
         # Short text (< 200 chars)
         result = await rag.extract_and_store("Alice lives in Vancouver", source="test")
@@ -63,7 +63,7 @@ class TestLongTextUsesLlm:
         rag = GraphRAG(client=mock_client, model_name="test", graph=mock_graph)
 
         # Mock _extract_ner to return some entities
-        rag._extract_ner = MagicMock(return_value=(
+        rag._extractor._extract_ner = MagicMock(return_value=(
             [{"name": "Mark", "type": "person", "importance": 0.8, "confidence": 0.9}],
             0.9,
         ))
@@ -91,7 +91,7 @@ class TestNerLlmMerge:
             {"name": "FastAPI", "type": "tool", "importance": 0.8},
         ]
 
-        merged = rag._merge_ner_llm(ner, llm)
+        merged = rag._extractor._merge_ner_llm(ner, llm)
 
         names = {e["name"] for e in merged}
         assert "Python" in names
@@ -112,7 +112,7 @@ class TestSpacyUnavailableFallback:
         rag = GraphRAG(client=mock_client, model_name="test", graph=mock_graph)
 
         # Mock _extract_ner to return empty (simulates spaCy unavailable)
-        rag._extract_ner = MagicMock(return_value=([], 0.0))
+        rag._extractor._extract_ner = MagicMock(return_value=([], 0.0))
 
         result = await rag.extract_and_store("Some text about Mark", source="test")
 

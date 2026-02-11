@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List
 from backend.core.logging import get_logger
 
-_logger = get_logger("file_utils")
+_log = get_logger("file_utils")
 
 TMP_FILE_PREFIX = ".axnmihn_tmp_"
 
@@ -25,7 +25,7 @@ def fsync_directory(dir_path: Path) -> None:
             os.close(dir_fd)
     except (OSError, PermissionError) as e:
 
-        _logger.warning("Directory fsync failed", path=str(dir_path), error=str(e))
+        _log.warning("Directory fsync failed", path=str(dir_path), error=str(e))
 
 def cleanup_orphaned_tmp_files(dir_path: Path) -> int:
 
@@ -43,14 +43,14 @@ def cleanup_orphaned_tmp_files(dir_path: Path) -> int:
                 age = now - p.stat().st_mtime
                 if age >= TMP_MAX_AGE_SECONDS:
                     p.unlink(missing_ok=True)
-                    _logger.info("Cleaned orphaned tmp", file=p.name, age_seconds=int(age))
+                    _log.info("Cleaned orphaned tmp", file=p.name, age_seconds=int(age))
                     deleted += 1
             except FileNotFoundError:
                 pass
             except Exception as e:
-                _logger.warning("Cleanup error", file=p.name, error=str(e))
+                _log.warning("Cleanup error", file=p.name, error=str(e))
     except Exception:
-        _logger.exception("Directory scan error", path=str(dir_path))
+        _log.exception("Directory scan error", path=str(dir_path))
 
     return deleted
 
@@ -68,14 +68,14 @@ async def startup_cleanup(data_dirs: List[Path]) -> int:
                 timeout_seconds=10.0
             )
         except Exception:
-            _logger.exception("Startup cleanup error", path=str(dir_path))
+            _log.exception("Startup cleanup error", path=str(dir_path))
             return 0
 
     results = await asyncio.gather(*[cleanup_one(d) for d in data_dirs])
     total = sum(results)
 
     if total > 0:
-        _logger.info("Startup cleanup complete", deleted_count=total)
+        _log.info("Startup cleanup complete", deleted_count=total)
 
     return total
 
@@ -127,7 +127,7 @@ def _release_os_lock(lock_fd: int) -> None:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         os.close(lock_fd)
     except (ImportError, OSError) as e:
-        _logger.warning("OS lock release failed", error=str(e))
+        _log.warning("OS lock release failed", error=str(e))
 
 async def get_async_file_lock(path: Path) -> asyncio.Lock:
 
@@ -153,7 +153,7 @@ async def async_file_lock(path: Path):
                 from backend.core.utils.async_utils import bounded_to_thread
 
                 if os.name == "nt":
-                    _logger.warning(
+                    _log.warning(
                         "ENABLE_OS_LOCK is enabled but not supported on Windows",
                         hint="Set ENABLE_OS_LOCK=False or use POSIX system"
                     )
@@ -174,4 +174,4 @@ async def async_file_lock(path: Path):
                     _release_os_lock, os_lock_fd, timeout_seconds=2.0
                 )
             except Exception as e:
-                _logger.error("Failed to release OS lock", error=str(e))
+                _log.error("Failed to release OS lock", error=str(e))

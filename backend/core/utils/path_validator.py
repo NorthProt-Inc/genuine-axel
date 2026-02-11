@@ -3,11 +3,11 @@ from typing import Optional, Tuple, List
 from backend.core.logging import get_logger
 from backend.core.security.path_security import PathAccessType, get_path_security
 
-logger = get_logger("path-validator")
+_log = get_logger("path-validator")
 
 ALLOWED_DIRECTORIES: List[Path] = [
-    Path("/home/northprot/projects/axnmihn"),
-    Path("/home/northprot/.axel"),
+    Path.home() / "projects" / "axnmihn",
+    Path.home() / ".axel",
 ]
 
 FORBIDDEN_PATTERNS: List[str] = [

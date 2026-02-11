@@ -7,7 +7,7 @@ Filters internal control tags and MCP tool call artifacts from streaming respons
 import re
 from typing import FrozenSet
 
-# === Tag Constants (분리하여 동적 로드 가능하도록) ===
+# === Tag Constants (separated for dynamic loading) ===
 
 INTERNAL_TAGS: FrozenSet[str] = frozenset({
     "attempt_completion",

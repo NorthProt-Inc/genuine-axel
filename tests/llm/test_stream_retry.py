@@ -172,7 +172,7 @@ class TestGeminiStreamRetry:
     async def test_error_monitor_records_on_failure(self, client: GeminiClient) -> None:
         self._setup_stream_error(client, Exception("503 broken"))
 
-        with patch("backend.llm.clients.error_monitor") as mock_monitor:
+        with patch("backend.llm.gemini_client.error_monitor") as mock_monitor:
             with pytest.raises(Exception, match="503"):
                 async for _ in client.generate_stream("test"):
                     pass

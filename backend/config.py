@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 from backend.core.logging import get_logger
-_logger = get_logger("config")
+_log = get_logger("config")
 
 load_dotenv()
 
@@ -97,7 +97,7 @@ def ensure_data_directories() -> None:
         try:
             directory.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            _logger.warning("Failed to create directory", path=str(directory), error=str(e))
+            _log.warning("Failed to create directory", path=str(directory), error=str(e))
 
 ALLOWED_TEXT_EXTENSIONS = ['.py', '.js', '.json', '.txt', '.md', '.html', '.css', '.csv', '.ts', '.tsx']
 
@@ -121,13 +121,13 @@ def _get_size_bytes(bytes_env: str, mb_env: str, default_mb: int) -> int:
         try:
             return max(0, int(raw_bytes))
         except ValueError:
-            _logger.warning("Invalid size env", env=bytes_env, value=raw_bytes)
+            _log.warning("Invalid size env", env=bytes_env, value=raw_bytes)
     raw_mb = os.getenv(mb_env)
     if raw_mb:
         try:
             return max(0, int(float(raw_mb) * 1024 * 1024))
         except ValueError:
-            _logger.warning("Invalid size env", env=mb_env, value=raw_mb)
+            _log.warning("Invalid size env", env=mb_env, value=raw_mb)
     return default_mb * 1024 * 1024
 
 MAX_UPLOAD_BYTES = _get_size_bytes("MAX_UPLOAD_BYTES", "MAX_UPLOAD_MB", 25)
@@ -150,7 +150,7 @@ def _get_int_env(name: str, default: int) -> int:
     try:
         return int(raw)
     except ValueError:
-        _logger.warning("Invalid int env", env=name, value=raw)
+        _log.warning("Invalid int env", env=name, value=raw)
         return default
 
 # PostgreSQL backend (set DATABASE_URL to enable PG mode, unset to keep SQLite/ChromaDB)
@@ -215,16 +215,16 @@ def _get_float_env(name: str, default: float) -> float:
     try:
         return float(raw)
     except ValueError:
-        _logger.warning("Invalid float env", env=name, value=raw)
+        _log.warning("Invalid float env", env=name, value=raw)
         return default
 
 MEMORY_BASE_DECAY_RATE = _get_float_env("MEMORY_BASE_DECAY_RATE", 0.001)
 MEMORY_MIN_RETENTION = _get_float_env("MEMORY_MIN_RETENTION", 0.3)
 MEMORY_DECAY_DELETE_THRESHOLD = _get_float_env("MEMORY_DECAY_DELETE_THRESHOLD", 0.03)
 MEMORY_SIMILARITY_THRESHOLD = _get_float_env("MEMORY_SIMILARITY_THRESHOLD", 0.90)
-MEMORY_MIN_IMPORTANCE = _get_float_env("MEMORY_MIN_IMPORTANCE", 0.25)
+MEMORY_MIN_IMPORTANCE = _get_float_env("MEMORY_MIN_IMPORTANCE", 0.55)
 
-# 메시지 축약 설정
+# Message archival settings
 MESSAGE_ARCHIVE_AFTER_DAYS = _get_int_env("MESSAGE_ARCHIVE_AFTER_DAYS", 7)
 MESSAGE_SUMMARY_MODEL = DEFAULT_GEMINI_MODEL
 

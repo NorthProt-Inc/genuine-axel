@@ -31,7 +31,10 @@ from .decay_calculator import (
     MEMORY_TYPE_DECAY_MULTIPLIERS,
 )
 from .consolidator import MemoryConsolidator
-from .facade import LongTermMemory, PromotionCriteria
+from .core import LongTermMemory
+from .promotion import PromotionCriteria
+from .access_tracker import AccessTracker
+from .retrieval import MemoryRetriever
 from .importance import calculate_importance_async, calculate_importance_sync
 from .migrator import LegacyMemoryMigrator
 from typing import Optional
@@ -46,6 +49,8 @@ __all__ = [
     "ChromaDBRepository",
     "AdaptiveDecayCalculator",
     "MemoryConsolidator",
+    "AccessTracker",
+    "MemoryRetriever",
     # Protocols
     "EmbeddingServiceProtocol",
     "MemoryRepositoryProtocol",

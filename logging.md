@@ -121,7 +121,7 @@ The following abbreviations are automatically applied to keep log messages conci
 ### Basic Logger Usage
 
 ```python
-from backend.core.logging.logging import get_logger
+from backend.core.logging import get_logger
 
 logger = get_logger("api.chat")
 
@@ -135,7 +135,7 @@ logger.error("Connection failed", host="db.local", retry=3)
 ### API Endpoint Logging
 
 ```python
-from backend.core.logging.logging import get_logger
+from backend.core.logging import get_logger
 
 logger = get_logger("api")
 
@@ -159,7 +159,7 @@ async def chat_endpoint(request: ChatRequest):
 ### Core Function Logging
 
 ```python
-from backend.core.logging.logging import get_logger
+from backend.core.logging import get_logger
 
 logger = get_logger("core.chat_handler")
 
@@ -180,7 +180,7 @@ async def handle_message(message: str, context: dict):
 ### Tool Function Logging
 
 ```python
-from backend.core.logging.logging import get_logger
+from backend.core.logging import get_logger
 
 logger = get_logger("tools.hass_ops")
 
@@ -204,7 +204,7 @@ async def control_device(entity_id: str, action: str):
 ### @logged Decorator Usage
 
 ```python
-from backend.core.logging.logging import logged
+from backend.core.logging import logged
 
 # Basic usage (entry/exit logs)
 @logged()
@@ -270,7 +270,7 @@ NO_COLOR=1 python -m backend.app | tee output.log
 ### Dynamic Level Change
 
 ```python
-from backend.core.logging.logging import set_log_level
+from backend.core.logging import set_log_level
 
 # Change log level at runtime
 set_log_level("DEBUG")  # Enable detailed logs
@@ -362,7 +362,7 @@ Certain keys are displayed in different colors for visual distinction:
 When a request ID is set, it's automatically included in all logs for that request:
 
 ```python
-from backend.core.logging.logging import set_request_id, reset_request_id
+from backend.core.logging import set_request_id, reset_request_id
 
 # At request start
 token = set_request_id("req-abc123")
@@ -390,7 +390,14 @@ Elapsed time is automatically displayed when `request_tracker` is active:
 backend/
 └── core/
     └── logging/
-        └── logging.py     # Main logging module
+        ├── __init__.py           # Public API exports
+        ├── constants.py          # Constants, colors, abbreviations
+        ├── formatters.py         # SmartFormatter, PlainFormatter, JsonFormatter
+        ├── structured_logger.py  # StructuredLogger, get_logger(), set_log_level()
+        ├── decorator.py          # @logged decorator
+        ├── logging.py            # Backward compatibility shim
+        ├── error_monitor.py      # Error monitoring (기존)
+        └── request_tracker.py    # Request tracking (기존)
 
 logs/
 ├── backend.log           # Backend plain text log (rotated, 10MB, 5 backups)
@@ -404,6 +411,26 @@ logs/
 ├── wakeword.log          # Wakeword service log
 ├── wakeword_error.log    # Wakeword errors only
 └── night_ops.log         # Night shift automation log
+```
+
+### Import 경로
+
+**권장 방법** (패키지 레벨 import):
+```python
+from backend.core.logging import get_logger, logged, set_log_level
+from backend.core.logging import set_request_id, reset_request_id
+```
+
+**하위 호환성** (기존 경로, 계속 동작함):
+```python
+from backend.core.logging.logging import get_logger, logged
+```
+
+**고급 사용** (서브모듈 직접 import):
+```python
+from backend.core.logging.constants import MODULE_COLORS, ABBREV
+from backend.core.logging.formatters import SmartFormatter
+from backend.core.logging.structured_logger import StructuredLogger
 ```
 
 ---
@@ -487,5 +514,6 @@ except Exception as e:
 
 ## Changelog
 
+- **v3.0**: 모듈화 — 549줄 단일 파일을 4개 모듈로 분리 (`constants.py`, `formatters.py`, `structured_logger.py`, `decorator.py`)
 - **v2.0**: Added module colors, abbreviation system, @logged decorator
 - **v1.0**: Initial structured logging system

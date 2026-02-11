@@ -454,7 +454,7 @@ class MCPServer:
             query = arguments.get("query", "")
             context = ""
             if self.memory:
-                context = self.memory.build_smart_context(query)
+                context = self.memory.build_smart_context_sync(query)
 
             return [{
                 "role": "user",

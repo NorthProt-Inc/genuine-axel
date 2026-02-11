@@ -1,9 +1,12 @@
 """
-Structured error types for MCP tools.
+Structured error types for MCP tools and application-wide error hierarchy.
 
 Provides consistent error classification and handling across all tools.
+Includes AxnmihnError base hierarchy (ADR-020 port from Axel).
 """
 
+import time
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
@@ -118,3 +121,134 @@ class ToolException(Exception):
     def __init__(self, error: ToolError):
         self.error = error
         super().__init__(error.to_response())
+
+
+# ---------------------------------------------------------------------------
+# Structured Error Hierarchy (ADR-020 port)
+# ---------------------------------------------------------------------------
+
+
+class AxnmihnError(Exception, ABC):
+    """Abstract base for all typed application errors."""
+
+    @abstractmethod
+    def _abstract_guard(self) -> None: ...
+
+    @property
+    @abstractmethod
+    def is_retryable(self) -> bool: ...
+
+    @property
+    @abstractmethod
+    def http_status(self) -> int: ...
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "",
+        request_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code or self.__class__.__name__.upper().replace("ERROR", "").strip("_") or type(self).__name__
+        self.timestamp = time.time()
+        self.request_id = request_id
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "is_retryable": self.is_retryable,
+            "http_status": self.http_status,
+            "timestamp": self.timestamp,
+            "request_id": self.request_id,
+        }
+
+
+class TransientError(AxnmihnError):
+    is_retryable: bool = True
+    http_status: int = 503
+
+    def _abstract_guard(self) -> None: ...
+
+    def __init__(self, message: str, *, code: str = "TRANSIENT", **kw: Any) -> None:
+        super().__init__(message, code=code, **kw)
+
+
+class PermanentError(AxnmihnError):
+    is_retryable: bool = False
+    http_status: int = 500
+
+    def _abstract_guard(self) -> None: ...
+
+    def __init__(self, message: str, *, code: str = "PERMANENT", **kw: Any) -> None:
+        super().__init__(message, code=code, **kw)
+
+
+class ValidationError(AxnmihnError):
+    is_retryable: bool = False
+    http_status: int = 400
+
+    def _abstract_guard(self) -> None: ...
+
+    def __init__(
+        self, message: str, *, code: str = "VALIDATION", field: str | None = None, **kw: Any
+    ) -> None:
+        super().__init__(message, code=code, **kw)
+        self.field = field
+
+
+class AuthError(AxnmihnError):
+    is_retryable: bool = False
+
+    def _abstract_guard(self) -> None: ...
+
+    def __init__(
+        self, message: str, *, code: str = "AUTH", http_status: int = 401, **kw: Any
+    ) -> None:
+        super().__init__(message, code=code, **kw)
+        self._http_status = http_status
+
+    @property  # type: ignore[override]
+    def http_status(self) -> int:
+        return self._http_status
+
+
+class ProviderError(AxnmihnError):
+    is_retryable: bool = True
+    http_status: int = 502
+
+    def _abstract_guard(self) -> None: ...
+
+    def __init__(
+        self, message: str, *, provider: str, code: str = "PROVIDER", **kw: Any
+    ) -> None:
+        super().__init__(message, code=code, **kw)
+        self.provider = provider
+
+
+class ToolExecutionError(AxnmihnError):
+    is_retryable: bool = False
+    http_status: int = 500
+
+    def _abstract_guard(self) -> None: ...
+
+    def __init__(
+        self, message: str, *, tool_name: str, code: str = "TOOL_EXECUTION", **kw: Any
+    ) -> None:
+        super().__init__(message, code=code, **kw)
+        self.tool_name = tool_name
+
+
+class TimeoutError(AxnmihnError):  # noqa: A001
+    is_retryable: bool = True
+    http_status: int = 504
+
+    def _abstract_guard(self) -> None: ...
+
+    def __init__(
+        self, message: str, *, timeout_ms: int, code: str = "TIMEOUT_ERR", **kw: Any
+    ) -> None:
+        super().__init__(message, code=code, **kw)
+        self.timeout_ms = timeout_ms

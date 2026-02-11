@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from backend.memory.permanent import LongTermMemory
     from backend.memory.graph_rag import GraphRAG
 
-_logger = get_logger("api.deps")
+_log = get_logger("api.deps")
 
 
 class ChatStateProtocol(Protocol):
@@ -82,6 +82,12 @@ class AppState:
     background_tasks: List = field(default_factory=list)
     shutdown_event: Any = None
 
+    # Metrics
+    metrics: Any = None
+
+    # Health checker
+    health_checker: Any = None
+
     # Stream tracking
     active_streams: set = field(default_factory=set)  # Fix: should be set not List
 
@@ -98,6 +104,8 @@ class AppState:
         self.turn_count = 0
         self.background_tasks = []
         self.shutdown_event = None
+        self.metrics = None
+        self.health_checker = None
         self.active_streams = set()  # Fix: should be set not list
 
 state = AppState()
@@ -152,7 +160,7 @@ def get_request_api_key(request: Request) -> Optional[str]:
 
     token = _extract_bearer_token(auth_header)
     if token:
-        _logger.debug(
+        _log.debug(
             "API key extracted from Bearer token",
             key_masked=_mask_key(token),
             auth_header_prefix=auth_header[:20] + "..." if len(auth_header) > 20 else auth_header
@@ -161,13 +169,13 @@ def get_request_api_key(request: Request) -> Optional[str]:
 
     x_api_key = request.headers.get("X-API-Key") or request.headers.get("X-Api-Key")
     if x_api_key:
-        _logger.debug(
+        _log.debug(
             "API key extracted from X-API-Key header",
             key_masked=_mask_key(x_api_key)
         )
         return x_api_key
 
-    _logger.debug(
+    _log.debug(
         "No API key found in request",
         has_auth_header=bool(auth_header),
         auth_header_value=auth_header[:30] + "..." if auth_header and len(auth_header) > 30 else auth_header
@@ -181,7 +189,7 @@ def is_api_key_configured() -> bool:
         True if AXNMIHN_API_KEY is set
     """
     configured = bool(AXNMIHN_API_KEY)
-    _logger.debug(
+    _log.debug(
         "API key configuration check",
         is_configured=configured,
         expected_key_masked=_mask_key(AXNMIHN_API_KEY)
@@ -200,13 +208,13 @@ def is_request_authorized(request: Request) -> bool:
         True if authorized or no auth required
     """
     if not AXNMIHN_API_KEY:
-        _logger.debug("Auth bypassed: no AXNMIHN_API_KEY configured")
+        _log.debug("Auth bypassed: no AXNMIHN_API_KEY configured")
         return True
 
     request_key = get_request_api_key(request)
     is_match = request_key == AXNMIHN_API_KEY
 
-    _logger.debug(
+    _log.debug(
         "API key comparison",
         received_key_masked=_mask_key(request_key),
         expected_key_masked=_mask_key(AXNMIHN_API_KEY),
@@ -229,7 +237,7 @@ def require_api_key(request: Request) -> None:
     # PERF-033: Check authorization once
     if not is_request_authorized(request):
         request_key = get_request_api_key(request)
-        _logger.warning(
+        _log.warning(
             "Unauthorized request",
             path=str(request.url.path),
             received_key_masked=_mask_key(request_key),

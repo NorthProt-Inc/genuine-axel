@@ -21,7 +21,7 @@ class MemGPTConfig:
     max_context_tokens: int = CONFIG_MAX_CONTEXT_TOKENS
     long_term_budget: int = MEMORY_LONG_TERM_BUDGET
 
-    eviction_score_threshold: float = 0.1  # 0.3 → 0.1 (permanent.py와 일관성)
+    eviction_score_threshold: float = 0.1  # 0.3 -> 0.1 (consistent with permanent.py)
     min_memories_keep: int = 3
 
     triage_enabled: bool = True

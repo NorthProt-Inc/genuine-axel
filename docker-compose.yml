@@ -1,0 +1,105 @@
+services:
+
+  # ============================================================================
+  # Infrastructure (migrated to native systemd services)
+  # - PostgreSQL: systemctl --user start axnmihn-postgres
+  # - Redis: systemctl --user start axnmihn-redis
+  # ============================================================================
+
+  # ============================================================================
+  # Application
+  # ============================================================================
+
+  backend:
+    build:
+      context: .
+      target: runtime
+    container_name: axnmihn-backend
+    restart: unless-stopped
+    command: python -m backend.app
+    ports:
+      - '8000:8000'
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-axel}:${POSTGRES_PASSWORD:-axel_dev_password}@localhost:5432/${POSTGRES_DB:-axel}
+      HOST: '0.0.0.0'
+      PORT: '8000'
+    volumes:
+      - app-data:/app/data
+      - app-logs:/app/logs
+      - app-storage:/app/storage
+    network_mode: host
+    mem_limit: 4g
+    cpus: 2.0
+    stop_grace_period: 30s
+
+  mcp:
+    build:
+      context: .
+      target: runtime
+    container_name: axnmihn-mcp
+    restart: unless-stopped
+    command: python -m backend.core.mcp_server --host 0.0.0.0 --port 8555
+    ports:
+      - '8555:8555'
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-axel}:${POSTGRES_PASSWORD:-axel_dev_password}@localhost:5432/${POSTGRES_DB:-axel}
+      MCP_DISABLED_TOOLS: read_file,list_directory,get_source_code,run_command,search_codebase,search_codebase_regex,web_search
+      MCP_DISABLED_CATEGORIES: hass
+    volumes:
+      - app-data:/app/data
+      - app-logs:/app/logs
+    network_mode: host
+    mem_limit: 1g
+    cpus: 1.0
+
+  research:
+    build:
+      context: .
+      target: research
+    container_name: axnmihn-research
+    restart: unless-stopped
+    command: python -m backend.protocols.mcp.research_server sse 8766
+    ports:
+      - '8766:8766'
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-axel}:${POSTGRES_PASSWORD:-axel_dev_password}@localhost:5432/${POSTGRES_DB:-axel}
+    volumes:
+      - app-data:/app/data
+      - app-logs:/app/logs
+      - app-storage:/app/storage
+    network_mode: host
+    mem_limit: 2g
+    cpus: 1.5
+
+  # ============================================================================
+  # Optional: TTS Microservice (requires GPU for Qwen3-TTS)
+  # Uncomment and configure if GPU is available.
+  # ============================================================================
+  #
+  # tts:
+  #   build:
+  #     context: .
+  #     target: runtime
+  #   container_name: axnmihn-tts
+  #   restart: unless-stopped
+  #   command: python -m backend.media.tts_service 0.0.0.0 8002
+  #   ports:
+  #     - '8002:8002'
+  #   env_file: .env
+  #   mem_limit: 4g
+  #   cpus: 2.0
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+
+volumes:
+  app-data:
+  app-logs:
+  app-storage:

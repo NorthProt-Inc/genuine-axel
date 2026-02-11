@@ -127,7 +127,6 @@ def main():
     print("\n[3/4] 인사이트 추출 (Gemini 3 Flash)...")
 
     from backend.core.utils.gemini_client import get_gemini_client, get_model_name
-    from backend.config import DEFAULT_GEMINI_MODEL
 
     client = get_gemini_client()
     model_name = get_model_name()

@@ -9,7 +9,7 @@ from backend.core.tools.hass_ops import HASSResult
 def mock_hass_api():
     """Patch _hass_api_call to avoid real HTTP calls."""
     with patch(
-        "backend.core.tools.hass_ops._hass_api_call",
+        "backend.core.tools.hass_ops.api._hass_api_call",
         new_callable=AsyncMock,
     ) as mock:
         mock.return_value = HASSResult(success=True, message="OK", data={})

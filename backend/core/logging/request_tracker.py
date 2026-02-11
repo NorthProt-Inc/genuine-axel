@@ -5,7 +5,7 @@ from typing import Optional
 from contextvars import ContextVar
 from .logging import get_logger, Colors
 
-_logger = get_logger("tracker")
+_log = get_logger("tracker")
 
 _current_request: ContextVar[Optional['RequestTracker']] = ContextVar('current_request', default=None)
 
@@ -130,6 +130,6 @@ def end_request():
     lines.append(f"└─ {status} ({total_s:.1f}s total)")
 
     summary = "\n".join(lines)
-    _logger.info("REQ summary", summary=summary)
+    _log.info("REQ summary", summary=summary)
 
     _current_request.set(None)

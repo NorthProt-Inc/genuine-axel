@@ -21,7 +21,7 @@ from backend.core.utils.opus_file_validator import (
     read_opus_file_content as _read_file_content,
 )
 
-logger = get_logger("opus-shared")
+_log = get_logger("opus-shared")
 
 # Read directly from env to avoid circular import (backend.config → backend.core → here)
 DEFAULT_MODEL: str = os.getenv("OPUS_DEFAULT_MODEL", "opus")
@@ -168,7 +168,7 @@ async def run_claude_cli(
     start_time = time.time()
 
     if model not in ("opus", "sonnet"):
-        logger.warning(f"Model '{model}' not allowed, forcing opus")
+        _log.warning(f"Model '{model}' not allowed, forcing opus")
         model = "opus"
 
     if context:
@@ -194,7 +194,7 @@ async def run_claude_cli(
 
     task_summary = generate_task_summary(instruction)
 
-    logger.info(
+    _log.info(
         f"[Opus] Executing: {task_summary}",
         model=model,
         prompt_chars=len(full_prompt),
@@ -222,7 +222,7 @@ async def run_claude_cli(
             process.kill()
             await process.wait()
             execution_time = time.time() - start_time
-            logger.error(f"[Opus] Task timed out after {timeout}s: {task_summary}")
+            _log.error(f"[Opus] Task timed out after {timeout}s: {task_summary}")
             return OpusResult(
                 success=False,
                 output="",
@@ -238,7 +238,7 @@ async def run_claude_cli(
         execution_time = time.time() - start_time
 
         if returncode == 0:
-            logger.info(
+            _log.info(
                 f"[Opus] Complete: {task_summary}",
                 time=f"{execution_time:.1f}s",
                 output_chars=len(stdout),
@@ -250,14 +250,14 @@ async def run_claude_cli(
                 execution_time=execution_time,
             )
         else:
-            logger.warning(
+            _log.warning(
                 f"[Opus] Failed: {task_summary}",
                 exit_code=returncode,
                 stderr_preview=stderr[:200] if stderr else None,
             )
 
             if model == "opus" and not _is_fallback:
-                logger.info(f"[Opus] Retrying with sonnet: {task_summary}")
+                _log.info(f"[Opus] Retrying with sonnet: {task_summary}")
                 return await run_claude_cli(
                     instruction=instruction,
                     context=context,
@@ -275,7 +275,7 @@ async def run_claude_cli(
             )
 
     except FileNotFoundError:
-        logger.error("[Opus] CLI not found - ensure claude is installed")
+        _log.error("[Opus] CLI not found - ensure claude is installed")
         return OpusResult(
             success=False,
             output="",
@@ -285,7 +285,7 @@ async def run_claude_cli(
 
     except Exception as e:
         execution_time = time.time() - start_time
-        logger.error(f"[Opus] Error: {e}", exc_info=True)
+        _log.error(f"[Opus] Error: {e}", exc_info=True)
         return OpusResult(
             success=False,
             output="",

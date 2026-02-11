@@ -6,7 +6,7 @@ from backend.core.logging import get_logger
 from backend.protocols.mcp.server import MCPServer, MCPRequest
 from backend.api.deps import get_state, require_api_key
 
-_logger = get_logger("api.mcp")
+_log = get_logger("api.mcp")
 
 router = APIRouter(tags=["MCP"], dependencies=[Depends(require_api_key)])
 
@@ -24,7 +24,7 @@ def _get_mcp_server() -> MCPServer:
 @router.get("/mcp/status")
 async def get_mcp_status():
 
-    _logger.debug("REQ recv", path="/mcp/status")
+    _log.debug("REQ recv", path="/mcp/status")
     mcp = _get_mcp_server()
     result = {
         "status": "running",
@@ -33,16 +33,16 @@ async def get_mcp_status():
         "tools": len(mcp.tools),
         "prompts": len(mcp.prompts),
     }
-    _logger.info("RES sent", status=200, tools=len(mcp.tools), resources=len(mcp.resources))
+    _log.info("RES sent", status=200, tools=len(mcp.tools), resources=len(mcp.resources))
     return result
 
 @router.get("/mcp/manifest")
 async def get_mcp_manifest():
 
-    _logger.debug("REQ recv", path="/mcp/manifest")
+    _log.debug("REQ recv", path="/mcp/manifest")
     mcp = _get_mcp_server()
     manifest = mcp.get_manifest()
-    _logger.info("RES sent", status=200, manifest_keys=list(manifest.keys()) if isinstance(manifest, dict) else "unknown")
+    _log.info("RES sent", status=200, manifest_keys=list(manifest.keys()) if isinstance(manifest, dict) else "unknown")
     return manifest
 
 class MCPExecuteRequest(BaseModel):
@@ -54,7 +54,7 @@ class MCPExecuteRequest(BaseModel):
 @router.post("/mcp/execute")
 async def execute_mcp(request: MCPExecuteRequest):
 
-    _logger.info("REQ recv", path="/mcp/execute", method=request.method, req_id=request.id)
+    _log.info("REQ recv", path="/mcp/execute", method=request.method, req_id=request.id)
     mcp = _get_mcp_server()
     try:
         mcp_request = MCPRequest(
@@ -64,7 +64,7 @@ async def execute_mcp(request: MCPExecuteRequest):
         )
         response = await mcp.handle_request(mcp_request)
         status_code = 200 if response.error is None else 400
-        _logger.info("RES sent", status=status_code, method=request.method, has_error=response.error is not None)
+        _log.info("RES sent", status=status_code, method=request.method, has_error=response.error is not None)
         return JSONResponse(
             status_code=status_code,
             content={
@@ -74,5 +74,5 @@ async def execute_mcp(request: MCPExecuteRequest):
             },
         )
     except Exception as e:
-        _logger.error("MCP execute error", error=str(e))
+        _log.error("MCP execute error", error=str(e))
         raise HTTPException(status_code=500, detail="MCP execution failed")

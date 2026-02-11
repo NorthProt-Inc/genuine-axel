@@ -11,7 +11,7 @@ from backend.core.logging import get_logger
 if TYPE_CHECKING:
     import aiohttp
 
-_logger = get_logger("error_monitor")
+_log = get_logger("error_monitor")
 
 @dataclass
 class ErrorCounter:
@@ -66,7 +66,7 @@ class ErrorMonitor:
         counter.count += 1
         counter.last_seen = now
 
-        _logger.debug("Error recorded",
+        _log.debug("Error recorded",
                      error_type=error_type,
                      count=counter.count,
                      window_seconds=self.WINDOW_SECONDS)
@@ -81,14 +81,14 @@ class ErrorMonitor:
         last = self._last_alert.get(error_type, 0)
 
         if now - last < self.ALERT_COOLDOWN:
-            _logger.debug("Alert suppressed (cooldown)",
+            _log.debug("Alert suppressed (cooldown)",
                          error_type=error_type,
                          cooldown_remaining=int(self.ALERT_COOLDOWN - (now - last)))
             return
 
         self._last_alert[error_type] = now
 
-        _logger.critical(f"ALERT: {error_type} errors exceeded threshold",
+        _log.critical(f"ALERT: {error_type} errors exceeded threshold",
                         count=counter.count,
                         window_seconds=self.WINDOW_SECONDS,
                         threshold=self.THRESHOLDS.get(error_type),
@@ -99,7 +99,7 @@ class ErrorMonitor:
                 asyncio.create_task(self._send_discord_alert(error_type, counter, details))
             except RuntimeError:
 
-                _logger.debug("Discord alert skipped (no event loop)")
+                _log.debug("Discord alert skipped (no event loop)")
 
     async def _send_discord_alert(self, error_type: str, counter: ErrorCounter, details: str) -> None:
 
@@ -122,12 +122,12 @@ class ErrorMonitor:
             session = self._get_session()
             async with session.post(self._discord_webhook, json=message) as resp:
                 if resp.status == 204:
-                    _logger.info("Discord alert sent", error_type=error_type)
+                    _log.info("Discord alert sent", error_type=error_type)
                 else:
-                    _logger.warning("Discord alert failed", status=resp.status)
+                    _log.warning("Discord alert failed", status=resp.status)
 
         except Exception as e:
-            _logger.error("Discord alert error", error=str(e))
+            _log.error("Discord alert error", error=str(e))
 
     def get_stats(self) -> Dict[str, Dict]:
 

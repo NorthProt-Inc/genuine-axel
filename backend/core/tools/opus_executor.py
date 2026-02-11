@@ -20,7 +20,7 @@ from backend.core.utils.opus_shared import (
     COMMAND_TIMEOUT,
 )
 
-logger = get_logger("opus-executor")
+_log = get_logger("opus-executor")
 
 
 async def delegate_to_opus(

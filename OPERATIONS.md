@@ -1,7 +1,7 @@
 # Axnmihn Operations Guide / 운영 가이드
 
 <details open>
-<summary><strong>🇰🇷 한국어 버전</strong></summary>
+<summary><strong>한국어 버전</strong></summary>
 
 > **환경:** Pop!_OS (Ubuntu 24.04 LTS) + Systemd  
 > **최종 업데이트:** 2026-02-11  
@@ -9,7 +9,7 @@
 
 ---
 
-## 📋 목차
+## 목차
 
 1. [서비스 구조](#서비스-구조)
 2. [기본 명령어](#기본-명령어)
@@ -64,8 +64,8 @@
 | 3000 | Open WebUI | Public |
 | 3001 | Markitdown MCP | Localhost |
 | 3002 | Context7 MCP | Localhost |
-| 5432 | PostgreSQL (Docker) | Localhost |
-| 6379 | Redis (Docker) | Localhost |
+| 5432 | PostgreSQL (systemd) | Localhost |
+| 6379 | Redis (systemd) | Localhost |
 | 8000 | Axnmihn Backend | Public |
 | 8002 | TTS | Localhost |
 | 8123 | Home Assistant | LAN |
@@ -79,8 +79,13 @@
 ├── backend/               # FastAPI 애플리케이션
 │   ├── app.py            # 진입점
 │   ├── config.py         # 설정
-│   ├── api/              # HTTP 라우터
+│   ├── api/              # HTTP/WebSocket 라우터
 │   ├── core/             # 핵심 로직
+│   │   ├── errors.py     # 구조화된 에러 계층 (AxnmihnError)
+│   │   ├── health/       # 컴포넌트 헬스체크
+│   │   ├── intent/       # 인텐트 분류기
+│   │   ├── telemetry/    # Prometheus 메트릭스
+│   │   └── ...
 │   ├── llm/              # LLM 프로바이더
 │   ├── memory/           # 6계층 메모리 시스템
 │   ├── native/           # C++17 확장 모듈
@@ -103,7 +108,7 @@
 │   └── cron/
 │       └── reports/      # 야간 작업 보고서
 ├── .env                  # 환경 변수 (API 키)
-├── docker-compose.yml    # PostgreSQL + Redis
+├── docker-compose.yml    # Docker 배포용 (선택)
 └── Dockerfile            # 멀티스테이지 빌드
 ```
 
@@ -114,6 +119,8 @@
 ├── axnmihn-backend.service
 ├── axnmihn-mcp.service
 ├── axnmihn-mcp-reclaim.service / .timer
+├── axnmihn-postgres.service
+├── axnmihn-redis.service
 ├── axnmihn-research.service
 ├── axnmihn-tts.service
 ├── axnmihn-wakeword.service
@@ -311,6 +318,9 @@ ss -tn | grep ":8000" | wc -l
 
 # 요청 로그 실시간 모니터링
 tail -f logs/backend.log | grep "POST\|GET"
+
+# Prometheus 메트릭스 (요청 횟수, 응답 시간, 에러 카운트)
+curl -s http://localhost:8000/metrics
 ```
 
 ---
@@ -351,6 +361,8 @@ curl -X POST http://localhost:8000/memory/consolidate \
 # 통합 상태 확인
 tail -f logs/backend.log | grep "consolidat"
 ```
+
+> **참고:** 앱 내에서 6시간마다 자동 consolidation이 실행됩니다. 수동 실행은 즉시 통합이 필요한 경우에만 사용하세요.
 
 ### 시나리오 3: 디스크 공간 부족
 
@@ -503,11 +515,11 @@ grep "circuit.*open" logs/backend.log
 ### 문제: PostgreSQL 연결 실패 (선택)
 
 ```bash
-# 1. Docker 컨테이너 상태 확인
-docker ps | grep postgres
+# 1. PostgreSQL 서비스 상태 확인
+systemctl --user status axnmihn-postgres
 
 # 2. PostgreSQL 로그 확인
-docker logs axnmihn-postgres-1
+journalctl --user -u axnmihn-postgres --no-pager -n 50
 
 # 3. 연결 테스트
 psql postgresql://axnmihn:password@localhost:5432/axnmihn -c "SELECT 1;"
@@ -515,13 +527,13 @@ psql postgresql://axnmihn:password@localhost:5432/axnmihn -c "SELECT 1;"
 # 4. DATABASE_URL 확인
 grep "DATABASE_URL" .env
 
-# 5. 컨테이너 재시작
-docker compose restart postgres
+# 5. 서비스 재시작
+systemctl --user restart axnmihn-postgres
 ```
 
 **해결 방법:**
-- 컨테이너 중지됨: `docker compose up -d postgres`
-- 비밀번호 불일치: `.env`와 `docker-compose.yml` 일치 확인
+- 서비스 중지됨: `systemctl --user start axnmihn-postgres`
+- 비밀번호 불일치: `.env`와 PostgreSQL 설정 일치 확인
 - 포트 충돌: 5432 포트 사용 프로세스 종료
 
 ---
@@ -560,10 +572,15 @@ journalctl --disk-usage
 # 수동 실행
 ~/projects-env/bin/python scripts/memory_gc.py
 
-# Cron 설정 (일일 실행)
-crontab -e
-# 0 2 * * * cd ~/projects/axnmihn && ~/projects-env/bin/python scripts/memory_gc.py >> logs/memory_gc.log 2>&1
+# Cron 등록 (매일 새벽 4시 실행 — 권장)
+(crontab -l 2>/dev/null; echo "0 4 * * * cd ~/projects/axnmihn && ~/projects-env/bin/python scripts/memory_gc.py >> logs/memory_gc.log 2>&1") | crontab -
+
+# 등록 확인
+crontab -l | grep memory_gc
 ```
+
+> **참고:** 앱 내에서도 6시간마다 자동 consolidation이 실행됩니다.
+> cron은 추가적인 해시 중복 제거 및 시맨틱 중복 제거를 담당합니다.
 
 **작업 내용:**
 - 중복 메모리 제거 (유사도 0.90 이상)
@@ -766,7 +783,7 @@ systemctl --user restart axnmihn-backend
 ---
 
 <details>
-<summary><strong>🇺🇸 English Version</strong></summary>
+<summary><strong>English Version</strong></summary>
 
 > **Environment:** Pop!_OS (Ubuntu 24.04 LTS) + Systemd  
 > **Last Update:** 2026-02-11  
@@ -774,7 +791,7 @@ systemctl --user restart axnmihn-backend
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 1. [Service Architecture](#service-architecture)
 2. [Basic Commands](#basic-commands)
@@ -829,8 +846,8 @@ All services managed via `systemctl --user` (no sudo required).
 | 3000 | Open WebUI | Public |
 | 3001 | Markitdown MCP | Localhost |
 | 3002 | Context7 MCP | Localhost |
-| 5432 | PostgreSQL (Docker) | Localhost |
-| 6379 | Redis (Docker) | Localhost |
+| 5432 | PostgreSQL (systemd) | Localhost |
+| 6379 | Redis (systemd) | Localhost |
 | 8000 | Axnmihn Backend | Public |
 | 8002 | TTS | Localhost |
 | 8123 | Home Assistant | LAN |
@@ -868,7 +885,7 @@ All services managed via `systemctl --user` (no sudo required).
 │   └── cron/
 │       └── reports/      # Night shift reports
 ├── .env                  # Environment variables (API keys)
-├── docker-compose.yml    # PostgreSQL + Redis
+├── docker-compose.yml    # Docker deployment (optional)
 └── Dockerfile            # Multi-stage build
 ```
 
@@ -1100,6 +1117,8 @@ curl -X POST http://localhost:8000/memory/consolidate \
 tail -f logs/backend.log | grep "consolidat"
 ```
 
+> **Note:** The app runs automatic consolidation every 6 hours. Manual execution is only needed for immediate consolidation.
+
 ### Scenario 3: Disk Space Low
 
 ```bash
@@ -1251,11 +1270,11 @@ grep "circuit.*open" logs/backend.log
 ### Issue: PostgreSQL Connection Failure (Optional)
 
 ```bash
-# 1. Docker container status
-docker ps | grep postgres
+# 1. PostgreSQL service status
+systemctl --user status axnmihn-postgres
 
 # 2. PostgreSQL logs
-docker logs axnmihn-postgres-1
+journalctl --user -u axnmihn-postgres --no-pager -n 50
 
 # 3. Connection test
 psql postgresql://axnmihn:password@localhost:5432/axnmihn -c "SELECT 1;"
@@ -1263,13 +1282,13 @@ psql postgresql://axnmihn:password@localhost:5432/axnmihn -c "SELECT 1;"
 # 4. DATABASE_URL
 grep "DATABASE_URL" .env
 
-# 5. Restart container
-docker compose restart postgres
+# 5. Restart service
+systemctl --user restart axnmihn-postgres
 ```
 
 **Solutions:**
-- Container stopped: `docker compose up -d postgres`
-- Password mismatch: Verify `.env` and `docker-compose.yml`
+- Service stopped: `systemctl --user start axnmihn-postgres`
+- Password mismatch: Verify `.env` and PostgreSQL configuration
 - Port conflict: Kill process on 5432
 
 ---
@@ -1308,10 +1327,15 @@ journalctl --disk-usage
 # Manual execution
 ~/projects-env/bin/python scripts/memory_gc.py
 
-# Cron setup (daily)
-crontab -e
-# 0 2 * * * cd ~/projects/axnmihn && ~/projects-env/bin/python scripts/memory_gc.py >> logs/memory_gc.log 2>&1
+# Register cron (daily at 4 AM — recommended)
+(crontab -l 2>/dev/null; echo "0 4 * * * cd ~/projects/axnmihn && ~/projects-env/bin/python scripts/memory_gc.py >> logs/memory_gc.log 2>&1") | crontab -
+
+# Verify registration
+crontab -l | grep memory_gc
 ```
+
+> **Note:** The app also runs automatic consolidation every 6 hours.
+> Cron handles additional hash and semantic deduplication.
 
 **Tasks:**
 - Remove duplicate memories (similarity >= 0.90)

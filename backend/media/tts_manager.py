@@ -13,7 +13,7 @@ from backend.config import TTS_IDLE_TIMEOUT
 from backend.core.logging import get_logger
 from backend.core.utils.lazy import Lazy
 
-_logger = get_logger("media.tts_manager")
+_log = get_logger("media.tts_manager")
 
 
 class TTSManager:
@@ -45,7 +45,7 @@ class TTSManager:
                 break
             elapsed = time.time() - self._last_used
             if elapsed >= self._idle_timeout:
-                _logger.info(
+                _log.info(
                     "TTS idle unload",
                     idle_sec=int(elapsed),
                     uses=self._use_count,
@@ -81,11 +81,11 @@ class TTSManager:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except Exception as e:
-            _logger.warning("CUDA cache clear failed", error=str(e))
+            _log.warning("CUDA cache clear failed", error=str(e))
 
         gc.collect()
         self._use_count = 0
-        _logger.info("TTS model unloaded")
+        _log.info("TTS model unloaded")
 
     async def shutdown(self) -> None:
         """Cancel idle checker and unload model."""
@@ -97,7 +97,7 @@ class TTSManager:
                 pass
 
         self._unload()
-        _logger.info("TTSManager shutdown complete")
+        _log.info("TTSManager shutdown complete")
 
 
 def _create_tts_manager() -> TTSManager:

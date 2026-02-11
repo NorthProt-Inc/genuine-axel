@@ -13,7 +13,7 @@ from backend.api.deps import get_state
 from backend.api.deps import require_api_key
 from backend.config import MAX_ATTACHMENT_BYTES
 
-_logger = get_logger("api.openai")
+_log = get_logger("api.openai")
 
 router = APIRouter(tags=["OpenAI Compatible"], dependencies=[Depends(require_api_key)])
 
@@ -73,7 +73,7 @@ async def openai_chat_completions(request_body: OpenAIChatRequest):
 
     model_choice = "anthropic"
 
-    _logger.info(
+    _log.info(
         "OpenAI API req",
         model=selected_model,
         tier=tier,
@@ -135,11 +135,11 @@ def _parse_multimodal_content(content: Any) -> tuple[str, list]:
                     mime_type = url.split(";base64,")[0].replace("data:", "")
                     b64_data = url.split(";base64,")[1]
                     if _is_b64_too_large(b64_data, MAX_ATTACHMENT_BYTES):
-                        _logger.warning("Image skip (size limit)", mime=mime_type)
+                        _log.warning("Image skip (size limit)", mime=mime_type)
                         text_parts.append("[Image skipped: size limit]")
                         continue
                     multimodal_images.append({"mime_type": mime_type, "data": b64_data})
-                    _logger.debug("Image parsed from data URL", mime=mime_type)
+                    _log.debug("Image parsed from data URL", mime=mime_type)
             text_parts.append("[Image attached]")
 
         elif part_type in ["file_url", "document", "file", "file_citation"]:
@@ -178,7 +178,7 @@ def _parse_file_attachment(file_obj: dict, part: dict) -> tuple[str, list]:
             b64_data = file_data
 
         if _is_b64_too_large(b64_data, MAX_ATTACHMENT_BYTES):
-            _logger.warning("Attach skip (size limit)", filename=filename)
+            _log.warning("Attach skip (size limit)", filename=filename)
             extracted_content = f"\n\n[Attached File: {filename} skipped - size limit]"
             return extracted_content, []
 
@@ -190,9 +190,9 @@ def _parse_file_attachment(file_obj: dict, part: dict) -> tuple[str, list]:
                 if pdf_images:
                     images.extend(pdf_images)
                     extracted_content = f"\n\n[Attached PDF: {filename} - {len(pdf_images)} pages as images]"
-                    _logger.info("PDF converted to images", filename=filename, pages=len(pdf_images))
+                    _log.info("PDF converted to images", filename=filename, pages=len(pdf_images))
             except Exception as e:
-                _logger.warning("PDF conversion failed", filename=filename, err=str(e))
+                _log.warning("PDF conversion failed", filename=filename, err=str(e))
 
         elif any(ext in mime_type or filename.endswith(ext) for ext in
                  ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp",
@@ -202,7 +202,7 @@ def _parse_file_attachment(file_obj: dict, part: dict) -> tuple[str, list]:
                 "data": b64_data,
                 "filename": filename
             })
-            _logger.debug("Image stored for Vision", filename=filename)
+            _log.debug("Image stored for Vision", filename=filename)
 
         elif any(ext in mime_type or filename.endswith(ext) for ext in
                  ["text/", ".txt", ".md", ".json", ".csv", ".xml", ".yaml", ".yml",
@@ -211,9 +211,9 @@ def _parse_file_attachment(file_obj: dict, part: dict) -> tuple[str, list]:
                 text_bytes = base64.b64decode(b64_data)
                 text_content = text_bytes.decode("utf-8", errors="replace")
                 extracted_content = f"\n\n[Attached File: {filename}]\n{text_content}"
-                _logger.info("Text file decoded", filename=filename, chars=len(text_content))
+                _log.info("Text file decoded", filename=filename, chars=len(text_content))
             except Exception as e:
-                _logger.warning("Text decode failed", filename=filename, err=str(e))
+                _log.warning("Text decode failed", filename=filename, err=str(e))
 
     return extracted_content, images
 
@@ -225,7 +225,7 @@ async def _stream_openai_response(handler: ChatHandler, request: HandlerRequest)
 
     state = get_state()
     state.active_streams.add(stream_id)
-    _logger.debug("stream started", stream_id=stream_id, active_count=len(state.active_streams))
+    _log.debug("stream started", stream_id=stream_id, active_count=len(state.active_streams))
 
     thinking_buffer: list[str] = []
     thinking_start_time: float = 0.0
@@ -316,7 +316,7 @@ async def _stream_openai_response(handler: ChatHandler, request: HandlerRequest)
 
     except Exception as e:
 
-        _logger.error("stream error", stream_id=stream_id, error=str(e)[:200])
+        _log.error("stream error", stream_id=stream_id, error=str(e)[:200])
         error_data = {
             "id": chat_id,
             "object": "chat.completion.chunk",
@@ -330,12 +330,11 @@ async def _stream_openai_response(handler: ChatHandler, request: HandlerRequest)
     finally:
 
         state.active_streams.discard(stream_id)
-        _logger.debug("stream ended", stream_id=stream_id, active_count=len(state.active_streams))
+        _log.debug("stream ended", stream_id=stream_id, active_count=len(state.active_streams))
 
 async def _non_stream_openai_response(handler: ChatHandler, request: HandlerRequest) -> dict:
 
     response_parts: list[str] = []
-    is_error = False
 
     async for event in handler.process(request):
         if event.type == EventType.TEXT:
@@ -343,7 +342,6 @@ async def _non_stream_openai_response(handler: ChatHandler, request: HandlerRequ
         elif event.type == EventType.ERROR:
             response_parts.clear()
             response_parts.append(f"Error: {event.content}")
-            is_error = True
 
     full_response = "".join(response_parts)
 

@@ -9,7 +9,7 @@ from backend.api.deps import require_api_key
 from backend.api.utils import read_upload_file
 from backend.media.tts_utils import clean_text_for_tts, convert_wav_to_mp3
 
-_logger = get_logger("api.audio")
+_log = get_logger("api.audio")
 
 
 from backend.core.utils.lazy import Lazy
@@ -46,21 +46,6 @@ async def create_speech(request: SpeechRequest, raw_request: Request):
     # TTS disabled — use OpenAI TTS directly from Open WebUI
     raise HTTPException(status_code=501, detail="TTS disabled on backend")
 
-    # --- original implementation (re-enable when ready) ---
-    # if not request.input or not request.input.strip():
-    #     raise HTTPException(status_code=400, detail="Input text is required")
-    #
-    # _logger.info("TTS request", chars=len(request.input))
-    #
-    # from backend.media.qwen_tts import QueueFullError
-    # from backend.config import TTS_SERVICE_URL
-    #
-    # # Phase 3: proxy mode when TTS_SERVICE_URL is set
-    # if TTS_SERVICE_URL:
-    #     return await _proxy_to_tts_service(request, raw_request)
-    #
-    # return await _synthesize_in_process(request, raw_request)
-
 
 async def _synthesize_in_process(request: SpeechRequest, raw_request: Request) -> Response:
     """Synthesize TTS in-process with queue/timeout/disconnect protection."""
@@ -69,7 +54,7 @@ async def _synthesize_in_process(request: SpeechRequest, raw_request: Request) -
     try:
         # Check if client already disconnected
         if await raw_request.is_disconnected():
-            _logger.info("TTS client disconnected before synthesis")
+            _log.info("TTS client disconnected before synthesis")
             raise HTTPException(status_code=499, detail="Client disconnected")
 
         cleaned_text = clean_text_for_tts(request.input)
@@ -83,7 +68,7 @@ async def _synthesize_in_process(request: SpeechRequest, raw_request: Request) -
 
         # Check disconnect again before expensive mp3 conversion
         if await raw_request.is_disconnected():
-            _logger.info("TTS client disconnected after synthesis")
+            _log.info("TTS client disconnected after synthesis")
             raise HTTPException(status_code=499, detail="Client disconnected")
 
         # mp3 변환
@@ -104,12 +89,12 @@ async def _synthesize_in_process(request: SpeechRequest, raw_request: Request) -
     except QueueFullError:
         raise HTTPException(status_code=429, detail="TTS queue full, try again later")
     except asyncio.TimeoutError:
-        _logger.warning("TTS synthesis timeout")
+        _log.warning("TTS synthesis timeout")
         raise HTTPException(status_code=504, detail="TTS synthesis timed out")
     except HTTPException:
         raise
     except Exception as e:
-        _logger.error("TTS error", error=str(e))
+        _log.error("TTS error", error=str(e))
         raise HTTPException(status_code=500, detail=f"TTS error: {str(e)}")
 
 
@@ -150,7 +135,7 @@ async def _proxy_to_tts_service(request: SpeechRequest, raw_request: Request) ->
     except HTTPException:
         raise
     except Exception as e:
-        _logger.error("TTS proxy error", error=str(e))
+        _log.error("TTS proxy error", error=str(e))
         raise HTTPException(status_code=502, detail=f"TTS service error: {str(e)}")
 
 
@@ -167,22 +152,21 @@ class TranscriptionResponse(BaseModel):
 async def create_transcription(
     file: UploadFile = File(...),
     model: str = Form("nova-3"),
-    language: str = Form(None),
     response_format: str = Form("json"),
 ):
     try:
         audio_data = await read_upload_file(file, MAX_AUDIO_BYTES)
         filename = file.filename or "audio.webm"
 
-        _logger.info("STT request", model=model, filename=filename, size=len(audio_data))
+        _log.info("STT request", model=model, filename=filename, size=len(audio_data))
 
         from backend.media import transcribe_audio
-        result = await transcribe_audio(audio_data, language)
+        result = await transcribe_audio(audio_data)
 
         if not result:
             raise HTTPException(status_code=500, detail="Transcription failed")
 
-        _logger.info("STT complete", chars=len(result))
+        _log.info("STT complete", chars=len(result))
 
         if response_format == "text":
             return Response(content=result, media_type="text/plain")
@@ -194,5 +178,5 @@ async def create_transcription(
     except HTTPException:
         raise
     except Exception as e:
-        _logger.error("STT error", error=str(e))
+        _log.error("STT error", error=str(e))
         raise HTTPException(status_code=500, detail=f"STT error: {str(e)}")

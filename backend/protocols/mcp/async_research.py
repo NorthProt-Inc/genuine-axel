@@ -177,8 +177,6 @@ async def _append_to_research_log(
         success: Whether research succeeded
     """
     try:
-        import asyncio
-
         # Initialize log file if it doesn't exist
         if not RESEARCH_LOG_PATH.exists():
             RESEARCH_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)

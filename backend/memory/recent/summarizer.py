@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Optional
 
 from backend.config import MESSAGE_SUMMARY_MODEL
 from backend.core.logging import get_logger
-from backend.memory.recent.repository import SessionRepository
 
 _log = get_logger("memory.recent.summarizer")
 

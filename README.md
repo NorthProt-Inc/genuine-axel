@@ -1,19 +1,19 @@
 # Axnmihn
 
 <details open>
-<summary><strong>🇰🇷 한국어</strong></summary>
+<summary><strong>한국어</strong></summary>
 
 **AI 어시스턴트 백엔드 시스템**
 
 FastAPI 기반의 AI 백엔드 서비스입니다. 6계층 메모리 시스템, MCP 생태계, 멀티 LLM 프로바이더를 통합한 현대적인 아키텍처를 제공합니다.
 
-**기술 스택:** Python 3.12 / FastAPI / ChromaDB / SQLite / PostgreSQL (선택) / C++17 네이티브 모듈
+**기술 스택:** Python 3.12 / FastAPI / PostgreSQL 17 + pgvector / Redis / C++17 네이티브 모듈
 
 **라이선스:** MIT
 
 ---
 
-## ✨ 주요 기능
+## 주요 기능
 
 - **6계층 메모리 시스템** — M0(이벤트 버퍼) → M1(워킹 메모리) → M3(세션 아카이브) → M4(장기 메모리) → M5.1-5.3(MemGPT/GraphRAG/MetaMemory)
 - **멀티 LLM 지원** — Gemini 3 Flash, Claude Sonnet 4.5, Circuit Breaker & Fallback
@@ -23,10 +23,15 @@ FastAPI 기반의 AI 백엔드 서비스입니다. 6계층 메모리 시스템, 
 - **OpenAI 호환 API** — `/v1/chat/completions` 엔드포인트
 - **적응형 페르소나** — 채널별 AI 성격 자동 조정
 - **컨텍스트 최적화** — 토큰 예산 기반 스마트 컨텍스트 조립
+- **WebSocket 실시간 통신** — 인증, Rate Limiting, Heartbeat 지원 (`/ws`)
+- **Prometheus 메트릭스** — `GET /metrics` 엔드포인트 (Counter, Gauge, Histogram)
+- **구조화된 에러 계층** — `AxnmihnError` 기반 7계층 에러 분류 (자동 HTTP 상태 매핑)
+- **Intent 분류기** — 키워드 기반 6종 인텐트 분류 (chat, search, tool_use, memory_query, command, creative)
+- **컴포넌트 헬스체크** — Memory, LLM, PostgreSQL 독립 헬스체크 + latency 추적
 
 ---
 
-## 🏗️ 아키텍처
+## 아키텍처
 
 ```
                       +------------------------------------------+
@@ -70,10 +75,11 @@ FastAPI 기반의 AI 백엔드 서비스입니다. 6계층 메모리 시스템, 
 
 | 컴포넌트 | 기술 | 목적 |
 |----------|------|------|
-| API 서버 | FastAPI + Uvicorn | Async HTTP/SSE, OpenAI 호환 |
+| API 서버 | FastAPI + Uvicorn | Async HTTP/SSE/WebSocket, OpenAI 호환 |
 | LLM 라우터 | Gemini 3 Flash + Claude Sonnet 4.5 | 멀티 프로바이더, Circuit Breaker |
 | 메모리 시스템 | 6계층 아키텍처 | 세션 간 지속적인 컨텍스트 |
 | MCP 서버 | Model Context Protocol (SSE) | 도구 생태계 |
+| 텔레메트리 | Prometheus 메트릭스 + 에러 계층 | 관측성 + 구조화된 에러 처리 |
 | 네이티브 모듈 | C++17 + pybind11 | SIMD 최적화 (그래프/decay) |
 | 오디오 | Deepgram Nova-3 (STT) + Qwen3-TTS / OpenAI (TTS) | 음성 파이프라인 |
 | Home Assistant | REST API | IoT 디바이스 제어 |
@@ -81,7 +87,7 @@ FastAPI 기반의 AI 백엔드 서비스입니다. 6계층 메모리 시스템, 
 
 ---
 
-## 💾 6계층 메모리 시스템
+## 6계층 메모리 시스템
 
 메모리 시스템은 6개의 기능 계층 (M0, M1, M3, M4, M5.1-5.3)으로 구성되며 `MemoryManager`(`backend/memory/unified.py`)가 오케스트레이션합니다.
 
@@ -151,7 +157,7 @@ decay_factor = f(
 
 ### 컨텍스트 조립
 
-`MemoryManager.build_smart_context()`는 문자 예산 내에서 모든 계층의 컨텍스트를 조립합니다:
+`await MemoryManager.build_smart_context()`는 문자 예산 내에서 모든 계층의 컨텍스트를 비동기 병렬로 조립합니다 (sync 래퍼: `build_smart_context_sync()`):
 
 | 섹션 | 기본 예산 (문자) | 설정 키 |
 |------|-----------------|---------|
@@ -161,6 +167,16 @@ decay_factor = f(
 | 장기 메모리 | 30,000 | `BUDGET_LONG_TERM` |
 | GraphRAG | 12,000 | `BUDGET_GRAPHRAG` |
 | 세션 아카이브 | 8,000 | `BUDGET_SESSION_ARCHIVE` |
+
+### 세션 관리
+
+- **자동 세션 타임아웃**: 30분 비활성 시 현재 세션을 자동 종료하고 새 세션 시작
+- **앱 종료 시 LLM 요약**: 종료 시 LLM 기반 세션 요약 시도 (10초 타임아웃, 실패 시 fallback)
+- **메모리 승격 기준**: importance ≥ 0.55 또는 (repetitions ≥ 2 AND importance ≥ 0.35)
+
+### 자동 Consolidation
+
+앱 내에서 6시간마다 자동으로 `consolidate_memories()` 실행. 별도로 `scripts/memory_gc.py`를 cron에 등록하여 해시/시맨틱 중복 제거도 수행합니다.
 
 ### PostgreSQL 백엔드 (선택)
 
@@ -176,11 +192,11 @@ backend/memory/pg/
   interaction_logger.py    # PgInteractionLogger
 ```
 
-필요: `pgvector/pgvector:pg17` (`docker-compose.yml` 참조)
+필요: PostgreSQL 17 + pgvector (`systemctl --user start axnmihn-postgres`)
 
 ---
 
-## 🔌 API 엔드포인트
+## API 엔드포인트
 
 모든 엔드포인트는 `AXNMIHN_API_KEY` 헤더 인증이 필요합니다.
 
@@ -188,8 +204,9 @@ backend/memory/pg/
 
 | 엔드포인트 | 메서드 | 설명 |
 |-----------|--------|------|
-| `/health` | GET | 전체 헬스체크 (메모리, LLM, 모듈) |
+| `/health` | GET | 전체 헬스체크 (메모리, LLM, 모듈, 컴포넌트 latency) |
 | `/health/quick` | GET | 최소 생존 확인 |
+| `/metrics` | GET | Prometheus 메트릭스 (text format) |
 | `/auth/status` | GET | 인증 상태 |
 | `/llm/providers` | GET | 사용 가능한 LLM 프로바이더 |
 | `/models` | GET | 사용 가능한 모델 |
@@ -199,6 +216,12 @@ backend/memory/pg/
 | 엔드포인트 | 메서드 | 설명 |
 |-----------|--------|------|
 | `/v1/chat/completions` | POST | 채팅 완성 (스트리밍/비스트리밍) |
+
+### WebSocket
+
+| 엔드포인트 | 프로토콜 | 설명 |
+|-----------|---------|------|
+| `/ws` | WebSocket | 실시간 채팅 (인증, Rate Limiting 30msg/min, Heartbeat) |
 
 ### 메모리
 
@@ -220,7 +243,7 @@ backend/memory/pg/
 
 ---
 
-## 🛠️ MCP 생태계
+## MCP 생태계
 
 SSE 전송을 통해 제공되는 도구들. 카테고리:
 
@@ -235,7 +258,7 @@ SSE 전송을 통해 제공되는 도구들. 카테고리:
 
 ---
 
-## ⚡ 네이티브 C++ 모듈
+## 네이티브 C++ 모듈
 
 C++17 + pybind11 + SIMD (AVX2/NEON)를 통한 성능 크리티컬 연산:
 
@@ -258,7 +281,7 @@ cd backend/native && pip install .
 
 ---
 
-## ⚙️ 설정
+## 설정
 
 ### 환경 변수 (`.env`)
 
@@ -302,7 +325,7 @@ MEMORY_BASE_DECAY_RATE=0.001
 MEMORY_MIN_RETENTION=0.3
 MEMORY_DECAY_DELETE_THRESHOLD=0.03
 MEMORY_SIMILARITY_THRESHOLD=0.90
-MEMORY_MIN_IMPORTANCE=0.25
+MEMORY_MIN_IMPORTANCE=0.55
 
 # 컨텍스트
 CONTEXT_WORKING_TURNS=20
@@ -320,9 +343,9 @@ HASS_TOKEN=
 
 ---
 
-## 🚀 빠른 시작
+## 빠른 시작
 
-### 옵션 A: Docker (권장)
+### 옵션 A: Systemd 서비스
 
 ```bash
 git clone https://github.com/NorthProt-Inc/axnmihn.git
@@ -331,13 +354,17 @@ cd axnmihn
 cp .env.example .env
 # .env 파일에서 API 키 설정
 
-docker compose up -d
+# 인프라 서비스 시작
+systemctl --user start axnmihn-postgres axnmihn-redis
+
+# 백엔드 시작
+systemctl --user start axnmihn-backend axnmihn-mcp axnmihn-research
 
 # 확인
 curl http://localhost:8000/health/quick
 ```
 
-이렇게 시작됩니다: backend (8000) + MCP (8555) + research (8766) + PostgreSQL (5432) + Redis (6379).
+backend (8000) + MCP (8555) + research (8766) + PostgreSQL (5432) + Redis (6379).
 
 ### 옵션 B: 로컬 개발
 
@@ -358,8 +385,8 @@ cd backend/native && pip install . && cd ../..
 # (선택) 리서치용 Playwright
 playwright install chromium
 
-# (선택) PostgreSQL + Redis
-docker compose up -d postgres redis
+# PostgreSQL + Redis (systemd 서비스)
+systemctl --user start axnmihn-postgres axnmihn-redis
 
 # 실행
 uvicorn backend.app:app --host 0.0.0.0 --port 8000
@@ -368,28 +395,9 @@ curl http://localhost:8000/health
 
 ---
 
-## 🐳 배포
+## 배포
 
-### Docker Compose (전체 스택)
-
-```bash
-docker compose up -d              # 모든 서비스 시작
-docker compose ps                 # 상태
-docker compose logs backend -f    # 백엔드 로그 팔로우
-docker compose down               # 모두 중지
-```
-
-| 서비스 | 포트 | 이미지/타겟 | 리소스 |
-|--------|------|------------|--------|
-| `backend` | 8000 | Dockerfile → runtime | 4G RAM, 2 CPU |
-| `mcp` | 8555 | Dockerfile → runtime | 1G RAM, 1 CPU |
-| `research` | 8766 | Dockerfile → research | 2G RAM, 1.5 CPU |
-| `postgres` | 5432 | pgvector/pgvector:pg17 | - |
-| `redis` | 6379 | redis:7-alpine (256MB) | - |
-
-TTS (GPU 의존)는 docker-compose.yml에서 주석 처리되어 있습니다. NVIDIA GPU 사용 가능 시 주석 해제하세요.
-
-### Systemd 서비스 (베어메탈)
+### Systemd 서비스 (기본)
 
 | 서비스 | 포트 | 목적 | 리소스 |
 |--------|------|------|--------|
@@ -402,6 +410,23 @@ TTS (GPU 의존)는 docker-compose.yml에서 주석 처리되어 있습니다. N
 | `markitdown-mcp` | 3001 | Markitdown MCP | 1G RAM |
 
 자세한 운영 가이드는 [OPERATIONS.md](OPERATIONS.md) 참조.
+
+### Docker Compose (선택)
+
+앱 서비스의 Docker 배포도 지원한다. 인프라(PostgreSQL, Redis)는 systemd로 운영하고, 앱만 Docker로 실행하는 하이브리드 구성이 가능하다.
+
+```bash
+docker compose up -d              # 앱 서비스 시작
+docker compose ps                 # 상태
+docker compose logs backend -f    # 백엔드 로그
+docker compose down               # 중지
+```
+
+| 서비스 | 포트 | 이미지/타겟 | 리소스 |
+|--------|------|------------|--------|
+| `backend` | 8000 | Dockerfile -> runtime | 4G RAM, 2 CPU |
+| `mcp` | 8555 | Dockerfile -> runtime | 1G RAM, 1 CPU |
+| `research` | 8766 | Dockerfile -> research | 2G RAM, 1.5 CPU |
 
 ### 유지보수
 
@@ -419,7 +444,7 @@ TTS (GPU 의존)는 docker-compose.yml에서 주석 처리되어 있습니다. N
 
 ---
 
-## 📁 프로젝트 구조
+## 프로젝트 구조
 
 ```
 axnmihn/
@@ -473,7 +498,7 @@ axnmihn/
 
 ---
 
-## 📚 문서
+## 문서
 
 - [OPERATIONS.md](OPERATIONS.md) — 운영 가이드 (한/영)
 - [AGENTS.md](AGENTS.md) — 커스텀 에이전트 정의
@@ -483,7 +508,7 @@ axnmihn/
 
 ---
 
-## 🤝 기여
+## 기여
 
 1. Fork the repository
 2. Create feature branch (`git checkout -b feature/amazing-feature`)
@@ -501,13 +526,13 @@ axnmihn/
 
 ---
 
-## 📄 라이선스
+## 라이선스
 
 MIT License - 자세한 내용은 [LICENSE](LICENSE) 참조
 
 ---
 
-## 🙏 감사의 말
+## 감사의 말
 
 - **FastAPI** — 현대적인 웹 프레임워크
 - **ChromaDB** — 벡터 데이터베이스
@@ -525,7 +550,7 @@ MIT License - 자세한 내용은 [LICENSE](LICENSE) 참조
 ---
 
 <details>
-<summary><strong>🇺🇸 English</strong></summary>
+<summary><strong>English</strong></summary>
 
 **AI Assistant Backend System**
 
@@ -537,7 +562,7 @@ A modern FastAPI-based AI backend service featuring a 6-layer memory system, MCP
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 - **6-Layer Memory System** — M0(Event Buffer) → M1(Working Memory) → M3(Session Archive) → M4(Long-Term) → M5.1-5.3(MemGPT/GraphRAG/MetaMemory)
 - **Multi-LLM Support** — Gemini 3 Flash, Claude Sonnet 4.5, Circuit Breaker & Fallback
@@ -550,7 +575,7 @@ A modern FastAPI-based AI backend service featuring a 6-layer memory system, MCP
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
                       +------------------------------------------+
@@ -605,7 +630,7 @@ A modern FastAPI-based AI backend service featuring a 6-layer memory system, MCP
 
 ---
 
-## 💾 6-Layer Memory System
+## 6-Layer Memory System
 
 The memory system consists of 6 functional layers (M0, M1, M3, M4, M5.1-5.3) orchestrated by `MemoryManager` (`backend/memory/unified.py`).
 
@@ -675,7 +700,7 @@ similarity dedup: 0.90     (MEMORY_SIMILARITY_THRESHOLD)
 
 ### Context Assembly
 
-`MemoryManager.build_smart_context()` assembles context from all layers within character budgets:
+`await MemoryManager.build_smart_context()` assembles context from all layers via async parallel fetch (sync wrapper: `build_smart_context_sync()`):
 
 | Section | Default Budget (chars) | Config Key |
 |---------|----------------------|------------|
@@ -685,6 +710,16 @@ similarity dedup: 0.90     (MEMORY_SIMILARITY_THRESHOLD)
 | Long-Term Memory | 30,000 | `BUDGET_LONG_TERM` |
 | GraphRAG | 12,000 | `BUDGET_GRAPHRAG` |
 | Session Archive | 8,000 | `BUDGET_SESSION_ARCHIVE` |
+
+### Session Management
+
+- **Auto session timeout**: Sessions automatically end after 30 minutes of inactivity
+- **Shutdown LLM summary**: On app shutdown, attempts LLM-based session summary (10s timeout, fallback on failure)
+- **Memory promotion criteria**: importance ≥ 0.55, or (repetitions ≥ 2 AND importance ≥ 0.35)
+
+### Auto Consolidation
+
+The app runs `consolidate_memories()` automatically every 6 hours. Additionally, `scripts/memory_gc.py` can be registered as a cron job for hash/semantic deduplication.
 
 ### PostgreSQL Backend (Optional)
 
@@ -704,7 +739,7 @@ Requires: `pgvector/pgvector:pg17` (see `docker-compose.yml`)
 
 ---
 
-## 🔌 API Endpoints
+## API Endpoints
 
 All endpoints require `AXNMIHN_API_KEY` header authentication.
 
@@ -744,7 +779,7 @@ All endpoints require `AXNMIHN_API_KEY` header authentication.
 
 ---
 
-## 🛠️ MCP Ecosystem
+## MCP Ecosystem
 
 Tools served via SSE transport. Categories:
 
@@ -759,7 +794,7 @@ Tool visibility is configurable via `MCP_DISABLED_TOOLS` and `MCP_DISABLED_CATEG
 
 ---
 
-## ⚡ Native C++ Module
+## Native C++ Module
 
 Performance-critical operations via C++17 + pybind11 + SIMD (AVX2/NEON):
 
@@ -782,7 +817,7 @@ cd backend/native && pip install .
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 ### Environment Variables (`.env`)
 
@@ -826,7 +861,7 @@ MEMORY_BASE_DECAY_RATE=0.001
 MEMORY_MIN_RETENTION=0.3
 MEMORY_DECAY_DELETE_THRESHOLD=0.03
 MEMORY_SIMILARITY_THRESHOLD=0.90
-MEMORY_MIN_IMPORTANCE=0.25
+MEMORY_MIN_IMPORTANCE=0.55
 
 # Context
 CONTEXT_WORKING_TURNS=20
@@ -844,7 +879,7 @@ HASS_TOKEN=
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Option A: Docker (Recommended)
 
@@ -892,7 +927,7 @@ curl http://localhost:8000/health
 
 ---
 
-## 🐳 Deployment
+## Deployment
 
 ### Docker Compose (Full Stack)
 
@@ -943,7 +978,7 @@ See [OPERATIONS.md](OPERATIONS.md) for detailed operations guide.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 axnmihn/
@@ -997,7 +1032,7 @@ axnmihn/
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 - [OPERATIONS.md](OPERATIONS.md) — Operations guide (KR/EN)
 - [AGENTS.md](AGENTS.md) — Custom agent definitions
@@ -1007,7 +1042,7 @@ axnmihn/
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create feature branch (`git checkout -b feature/amazing-feature`)
@@ -1025,13 +1060,13 @@ axnmihn/
 
 ---
 
-## 📄 License
+## License
 
 MIT License - see [LICENSE](LICENSE) for details
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **FastAPI** — Modern web framework
 - **ChromaDB** — Vector database

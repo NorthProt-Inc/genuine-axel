@@ -79,7 +79,8 @@ def _make_scored_memory(id_, content, score):
 
 class TestParallelAllSucceed:
 
-    def test_parallel_all_succeed(self):
+    @pytest.mark.asyncio
+    async def test_parallel_all_succeed(self):
         """All 3 sources return data → all sections present in context."""
         mems = [_make_scored_memory("m1", "Alice is a developer", 0.9)]
         mgr = _make_manager(
@@ -88,7 +89,7 @@ class TestParallelAllSucceed:
             graph_result="Mark --[uses]--> Python",
         )
 
-        result = mgr.build_smart_context("What does Alice do?")
+        result = await mgr.build_smart_context("What does Alice do?")
 
         assert "관련 장기 기억" in result
         assert "최근 세션 기록" in result
@@ -97,7 +98,8 @@ class TestParallelAllSucceed:
 
 class TestParallelOneSourceFails:
 
-    def test_parallel_one_source_fails(self):
+    @pytest.mark.asyncio
+    async def test_parallel_one_source_fails(self):
         """One source raises exception → other 2 sources still present."""
         mems = [_make_scored_memory("m1", "Alice likes Python", 0.8)]
         mgr = _make_manager(
@@ -106,7 +108,7 @@ class TestParallelOneSourceFails:
             graph_result="Mark --[knows]--> Alice",
         )
 
-        result = mgr.build_smart_context("Tell me about Alice")
+        result = await mgr.build_smart_context("Tell me about Alice")
 
         assert "관련 장기 기억" in result
         assert "관계 기반 지식" in result
@@ -116,7 +118,8 @@ class TestParallelOneSourceFails:
 
 class TestParallelAllFail:
 
-    def test_parallel_all_fail(self):
+    @pytest.mark.asyncio
+    async def test_parallel_all_fail(self):
         """All sources fail → only time context + working context remain."""
         mgr = _make_manager(
             memgpt_exc=RuntimeError("ChromaDB down"),
@@ -124,7 +127,7 @@ class TestParallelAllFail:
             graph_exc=RuntimeError("Graph corrupt"),
         )
 
-        result = mgr.build_smart_context("anything")
+        result = await mgr.build_smart_context("anything")
 
         # Working context should still be present
         assert "현재 대화" in result
@@ -138,15 +141,15 @@ class TestSyncFallbackInRunningLoop:
 
     @pytest.mark.asyncio
     async def test_sync_fallback_in_running_loop(self):
-        """When called inside a running event loop, sync version is used."""
+        """build_smart_context_sync uses sync version inside running loop."""
         mgr = _make_manager(
             memgpt_result=([], 0),
             session_result=None,
             graph_result=None,
         )
 
-        # Call build_smart_context inside an async function (running loop exists)
-        result = mgr.build_smart_context("test query")
+        # Call build_smart_context_sync inside an async function (running loop exists)
+        result = mgr.build_smart_context_sync("test query")
 
         # Should still produce valid output (uses sync path)
         assert isinstance(result, str)

@@ -2,7 +2,7 @@ import asyncio
 from typing import Callable, Any
 from backend.core.logging import get_logger
 
-_logger = get_logger("async_utils")
+_log = get_logger("async_utils")
 
 class ConcurrencyLimitError(Exception):
 

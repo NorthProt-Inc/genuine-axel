@@ -35,15 +35,14 @@ def MemoryManager():
 class TestBuildSmartContextDelegation:
     """Verify build_smart_context delegates to _build_smart_context_sync or async."""
 
-    def test_build_smart_context_returns_string(self, MemoryManager) -> None:
-        """build_smart_context returns a string from sync or async path."""
+    @pytest.mark.asyncio
+    async def test_build_smart_context_returns_string(self, MemoryManager) -> None:
+        """build_smart_context returns a string from async path."""
         with patch.object(MemoryManager, "__init__", lambda self, **kw: None):
             mm = MemoryManager()
             mm._build_smart_context_sync = MagicMock(return_value="ctx")
             mm._build_smart_context_async = AsyncMock(return_value="ctx")
-            result = mm.build_smart_context("hello")
-            # Inside a test (no running loop), should use async path via asyncio.run
-            # or sync fallback — either way returns a string
+            result = await mm.build_smart_context("hello")
             assert isinstance(result, str)
 
     def test_async_method_exists(self, MemoryManager) -> None:

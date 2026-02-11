@@ -104,9 +104,10 @@ class SessionRepository:
                     """INSERT OR REPLACE INTO sessions
                        (session_id, summary, key_topics, emotional_tone,
                         turn_count, started_at, ended_at, expires_at, messages_json)
-                       VALUES (?, NULL, ?, ?, ?, ?, ?, ?, NULL)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
                     (
                         session_id,
+                        summary,
                         json.dumps(key_topics, ensure_ascii=False),
                         emotional_tone,
                         turn_count,

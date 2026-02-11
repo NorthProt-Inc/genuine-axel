@@ -6,7 +6,7 @@ from collections.abc import AsyncGenerator
 from typing import Any, Callable, Optional, Set, TypeVar
 from backend.core.logging import get_logger
 
-_logger = get_logger("retry")
+_log = get_logger("retry")
 
 T = TypeVar("T")
 
@@ -102,7 +102,7 @@ async def retry_async(
             error_type = classify_error(e)
             delay = calculate_backoff(attempt, error_type, config)
 
-            _logger.warning(
+            _log.warning(
                 "Retry scheduled",
                 attempt=attempt,
                 max_retries=config.max_retries,
@@ -141,7 +141,7 @@ def retry_sync(
             error_type = classify_error(e)
             delay = calculate_backoff(attempt, error_type, config)
 
-            _logger.warning(
+            _log.warning(
                 "Retry scheduled (sync)",
                 attempt=attempt,
                 max_retries=config.max_retries,
@@ -192,7 +192,7 @@ async def retry_async_generator(
             error_type = classify_error(e)
             delay = calculate_backoff(attempt, error_type, config)
 
-            _logger.warning(
+            _log.warning(
                 "Retry scheduled (async generator)",
                 attempt=attempt,
                 max_retries=config.max_retries,

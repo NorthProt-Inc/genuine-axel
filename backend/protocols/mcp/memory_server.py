@@ -117,7 +117,6 @@ async def retrieve_context(
                     ts = meta.get("event_timestamp") or meta.get("created_at") or ""
                     parsed = _parse_timestamp(ts)
 
-                    from datetime import datetime, timezone
                     return parsed if parsed else datetime(1970, 1, 1, tzinfo=timezone.utc)
 
                 sorted_results = sorted(results, key=get_sort_timestamp, reverse=True)

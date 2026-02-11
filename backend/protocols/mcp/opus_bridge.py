@@ -22,7 +22,7 @@ from backend.core.utils.opus_shared import (
     DEFAULT_MODEL,
 )
 
-logger = get_logger("opus-bridge")
+_log = get_logger("opus-bridge")
 
 opus_server = Server("opus-bridge")
 
@@ -99,7 +99,7 @@ Use this to verify the Opus bridge is properly configured.""",
 
 @opus_server.call_tool()
 async def call_tool(name: str, arguments: dict) -> Sequence[types.TextContent]:
-    logger.info(f"Tool called: {name}", args=str(arguments)[:200])
+    _log.info(f"Tool called: {name}", args=str(arguments)[:200])
 
     try:
         if name == "run_opus_task":
@@ -174,14 +174,14 @@ async def call_tool(name: str, arguments: dict) -> Sequence[types.TextContent]:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
     except Exception as e:
-        logger.error(f"Tool {name} failed: {e}", exc_info=True)
+        _log.error(f"Tool {name} failed: {e}", exc_info=True)
         return [TextContent(type="text", text=f"Tool execution failed: {str(e)}")]
 
 
 async def run_stdio():
     from mcp.server.stdio import stdio_server
 
-    logger.info("Starting Opus Bridge in stdio mode")
+    _log.info("Starting Opus Bridge in stdio mode")
 
     async with stdio_server() as (read_stream, write_stream):
         await opus_server.run(
@@ -216,7 +216,7 @@ async def run_sse(host: str = "0.0.0.0", port: int = 8766):
     async def health():
         return {"status": "healthy", "server": "opus-bridge"}
 
-    logger.info(f"Starting Opus Bridge in SSE mode on {host}:{port}")
+    _log.info(f"Starting Opus Bridge in SSE mode on {host}:{port}")
 
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)
@@ -254,7 +254,7 @@ def main():
         else:
             asyncio.run(run_sse(host=args.host, port=args.port))
     except KeyboardInterrupt:
-        logger.info("Opus Bridge shutting down")
+        _log.info("Opus Bridge shutting down")
 
 
 if __name__ == "__main__":

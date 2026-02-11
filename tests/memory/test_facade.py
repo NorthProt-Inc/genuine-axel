@@ -27,11 +27,11 @@ class TestPromotionCriteria:
         assert reason == "forced_promotion"
 
     def test_repetition_threshold(self):
-        """High repetitions should promote."""
+        """High repetitions with sufficient importance should promote."""
         should, reason = PromotionCriteria.should_promote(
             content="test",
-            repetitions=MemoryConfig.MIN_REPETITIONS,
-            importance=0.1,
+            repetitions=2,
+            importance=0.4,
         )
         assert should is True
         assert "repetitions" in reason
@@ -81,11 +81,27 @@ class TestLongTermMemoryFacade:
         # Set up other attributes
         ltm._decay_calculator = MagicMock()
         ltm._consolidator = MagicMock()
-        ltm._repetition_cache = {}
+        ltm._repetition_cache = MagicMock()
+        ltm._repetition_cache.__len__ = MagicMock(return_value=0)
         ltm._pending_access_updates = set()
         ltm._last_flush_time = 0
         ltm.db_path = "/tmp/test"
         ltm.embedding_model = "test-model"
+
+        # Set up new refactored components
+        ltm._access_tracker = MagicMock()
+        ltm._access_tracker.pending_count = 0
+        ltm._access_tracker.track_access = MagicMock()
+        ltm._access_tracker.flush = MagicMock(return_value=0)
+        ltm._access_tracker.maybe_flush = MagicMock()
+
+        ltm._retriever = MagicMock()
+        ltm._retriever.find_similar_memories = MagicMock()
+        ltm._retriever.get_embedding = MagicMock(return_value=[0.1] * 3072)
+        ltm._retriever.query = MagicMock(return_value=[])
+
+        ltm._content_key_generator = MagicMock()
+        ltm._content_key_generator.get_content_key = MagicMock(side_effect=lambda x: x.lower()[:100])
 
         return ltm
 
@@ -113,15 +129,16 @@ class TestLongTermMemoryFacade:
 
     def test_find_similar_memories(self, mock_ltm):
         """find_similar_memories should return similar content with hybrid scoring."""
-        mock_ltm._repository.query_by_embedding.return_value = [
+        # Mock the retriever's find_similar_memories method
+        mock_ltm._retriever.find_similar_memories.return_value = [
             {"id": "mem-001", "content": "test content memo", "metadata": {}, "similarity": 0.95},
-            {"id": "mem-002", "content": "other memo", "metadata": {}, "similarity": 0.7},
         ]
 
         result = mock_ltm.find_similar_memories("test content", threshold=0.8)
 
         assert len(result) == 1  # Only mem-001 hybrid score >= 0.8
         assert result[0]["id"] == "mem-001"
+        mock_ltm._retriever.find_similar_memories.assert_called_once_with("test content", 0.8, 5)
 
     def test_get_embedding_for_text(self, mock_ltm):
         """get_embedding_for_text should return embedding vector."""
@@ -129,7 +146,7 @@ class TestLongTermMemoryFacade:
 
         assert result is not None
         assert len(result) == 3072
-        mock_ltm._embedding_service.get_embedding.assert_called_once()
+        mock_ltm._retriever.get_embedding.assert_called_once()
 
     def test_backward_compatible_collection_property(self, mock_ltm):
         """collection property should expose underlying ChromaDB collection."""
@@ -155,13 +172,13 @@ class TestLongTermMemoryFacade:
 
     def test_flush_access_updates(self, mock_ltm):
         """flush_access_updates should update pending access times."""
-        mock_ltm._pending_access_updates = {"mem-001", "mem-002"}
-        mock_ltm._repository.batch_update_metadata.return_value = 2
+        # Now flush_access_updates delegates to _access_tracker
+        mock_ltm._access_tracker.flush.return_value = 2
 
         updated = mock_ltm.flush_access_updates()
 
         assert updated == 2
-        assert len(mock_ltm._pending_access_updates) == 0
+        mock_ltm._access_tracker.flush.assert_called_once()
 
     def test_consolidate_memories_delegates(self, mock_ltm):
         """consolidate_memories should delegate to consolidator."""

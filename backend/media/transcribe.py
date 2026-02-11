@@ -9,7 +9,7 @@ _log = get_logger("media.transcribe")
 
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
 
-async def transcribe_audio_deepgram(audio_data: bytes, language: str = None) -> str:
+async def transcribe_audio_deepgram(audio_data: bytes) -> str:
 
     if not DEEPGRAM_API_KEY:
         _log.error("stt failed", reason="DEEPGRAM_API_KEY not set")
@@ -65,15 +65,15 @@ async def transcribe_audio_deepgram(audio_data: bytes, language: str = None) -> 
     _log.info("stt done", dur_ms=dur_ms, text_len=0)
     return ""
 
-async def transcribe_audio(audio_data: bytes, language: str = "ko") -> str:
+async def transcribe_audio(audio_data: bytes) -> str:
 
     if not DEEPGRAM_API_KEY:
         _log.error("stt failed", reason="DEEPGRAM_API_KEY not set")
         raise ValueError("DEEPGRAM_API_KEY not set")
 
-    return await transcribe_audio_deepgram(audio_data, language)
+    return await transcribe_audio_deepgram(audio_data)
 
-async def transcribe_audio_file(file_path: str, language: str = "ko") -> str:
+async def transcribe_audio_file(file_path: str) -> str:
 
     file_ext = os.path.splitext(file_path)[1].lstrip(".") or "unknown"
 
@@ -90,4 +90,4 @@ async def transcribe_audio_file(file_path: str, language: str = "ko") -> str:
     size_kb = len(audio_data) / 1024
     _log.info("stt file loaded", file_path=file_path, file_size_kb=round(size_kb, 2), format=file_ext)
 
-    return await transcribe_audio(audio_data, language)
+    return await transcribe_audio(audio_data)

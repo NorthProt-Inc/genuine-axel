@@ -9,7 +9,7 @@ from backend.core.tools.hass_ops import HASSResult
 def mock_api_all_states():
     """Mock _hass_api_call returning mixed known/unknown entities."""
     with patch(
-        "backend.core.tools.hass_ops._hass_api_call",
+        "backend.core.tools.hass_ops.api._hass_api_call",
         new_callable=AsyncMock,
     ) as mock:
         mock.return_value = HASSResult(
@@ -54,7 +54,7 @@ class TestGetAllStates:
     async def test_api_failure_propagated(self):
         """API failures should be returned as-is."""
         with patch(
-            "backend.core.tools.hass_ops._hass_api_call",
+            "backend.core.tools.hass_ops.api._hass_api_call",
             new_callable=AsyncMock,
             return_value=HASSResult(success=False, message="", error="timeout"),
         ):

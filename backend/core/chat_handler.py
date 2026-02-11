@@ -32,6 +32,7 @@ from backend.core.services.react_service import (
     EventType,
 )
 from backend.core.services.emotion_service import classify_emotion
+from backend.core.intent.classifier import classify_keyword
 from backend.llm.router import DEFAULT_MODEL
 from backend.config import CHAT_THINKING_LEVEL
 
@@ -160,6 +161,26 @@ class ChatHandler:
         user_input = request.user_input
         start_time = time.perf_counter()
 
+        # Auto session timeout: end stale session (30min inactivity)
+        if self.state.memory_manager:
+            working = self.state.memory_manager.working
+            if working.get_turn_count() > 0 and working.last_activity:
+                from datetime import datetime, timedelta
+                from backend.core.utils.timezone import VANCOUVER_TZ
+
+                now = datetime.now(VANCOUVER_TZ)
+                elapsed = now - working.last_activity.replace(tzinfo=VANCOUVER_TZ) if working.last_activity.tzinfo is None else now - working.last_activity
+                if elapsed > timedelta(minutes=30):
+                    _log.info("CHAT auto session timeout", elapsed_min=int(elapsed.total_seconds() / 60))
+                    try:
+                        await self.state.memory_manager.end_session(
+                            allow_llm_summary=True,
+                            summary_timeout_seconds=10.0,
+                            allow_fallback_summary=True,
+                        )
+                    except Exception as e:
+                        _log.warning("CHAT auto session end failed", error=str(e))
+
         # Log start
         session_id = self._get_session_id()
         _log.info(
@@ -172,8 +193,12 @@ class ChatHandler:
             longterm=self._get_longterm_count(),
         )
 
-        # Classification (simplified)
-        classification = ClassificationResult(needs_search=False, needs_tools=False)
+        # Intent-based classification
+        intent_result = classify_keyword(user_input)
+        classification = ClassificationResult(
+            needs_search=intent_result.intent == "search",
+            needs_tools=intent_result.intent in ("tool_use", "command"),
+        )
         rt.log_gateway(intent="chat", model="default", elapsed_ms=(time.perf_counter() - start_time) * 1000)
 
         # Model selection
