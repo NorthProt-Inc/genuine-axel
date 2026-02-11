@@ -14,7 +14,6 @@ from mcp.server.sse import SseServerTransport
 from mcp.server.stdio import stdio_server
 from fastapi import Request
 from starlette.applications import Starlette
-from starlette.responses import Response as StarletteResponse
 from starlette.routing import Route as StarletteRoute
 
 if TYPE_CHECKING:
@@ -46,7 +45,12 @@ def create_sse_handlers(mcp_server: "Server"):
     """
 
     async def handle_sse_raw(request: Request):
-        """Raw SSE handler that directly controls ASGI response."""
+        """Raw SSE handler that directly controls ASGI response.
+
+        connect_sse sends the HTTP response directly via request._send.
+        This handler is registered as a raw ASGI endpoint (not wrapped by
+        request_response), so returning None is safe.
+        """
         connection_id = id(request.scope)
         active_connections.add(connection_id)
         _log.info("SSE conn opened", conn_id=connection_id)
@@ -55,7 +59,7 @@ def create_sse_handlers(mcp_server: "Server"):
             async with sse_transport.connect_sse(
                 request.scope,
                 request.receive,
-                request._send
+                request._send,
             ) as streams:
                 await mcp_server.run(
                     streams[0],
@@ -70,16 +74,17 @@ def create_sse_handlers(mcp_server: "Server"):
             active_connections.discard(connection_id)
             _log.info("SSE conn closed", conn_id=connection_id, active=len(active_connections))
 
-        return StarletteResponse()
-
     async def handle_messages_raw(request: Request):
-        """Raw messages handler for MCP POST requests."""
+        """Raw messages handler for MCP POST requests.
+
+        handle_post_message sends the ASGI response directly via
+        request._send. Registered as raw ASGI endpoint.
+        """
         await sse_transport.handle_post_message(
             request.scope,
             request.receive,
-            request._send
+            request._send,
         )
-        return StarletteResponse(status_code=202)
 
     return handle_sse_raw, handle_messages_raw
 
@@ -87,6 +92,10 @@ def create_sse_handlers(mcp_server: "Server"):
 def create_sse_app(mcp_server: "Server") -> Starlette:
     """
     Create a Starlette sub-app for MCP SSE endpoints.
+
+    Uses raw ASGI callables to bypass Starlette's request_response wrapper,
+    which expects a Response return value. SSE handlers send responses
+    directly via ASGI send, so returning None is expected.
 
     Args:
         mcp_server: The MCP Server instance
@@ -96,9 +105,19 @@ def create_sse_app(mcp_server: "Server") -> Starlette:
     """
     handle_sse, handle_messages = create_sse_handlers(mcp_server)
 
+    class _SSEEndpoint:
+        async def __call__(self, scope, receive, send):
+            request = Request(scope, receive, send)
+            await handle_sse(request)
+
+    class _MessagesEndpoint:
+        async def __call__(self, scope, receive, send):
+            request = Request(scope, receive, send)
+            await handle_messages(request)
+
     return Starlette(routes=[
-        StarletteRoute("/", endpoint=handle_sse, methods=["GET"]),
-        StarletteRoute("/messages", endpoint=handle_messages, methods=["POST"]),
+        StarletteRoute("/", endpoint=_SSEEndpoint(), methods=["GET"]),
+        StarletteRoute("/messages", endpoint=_MessagesEndpoint(), methods=["POST"]),
     ])
 
 
