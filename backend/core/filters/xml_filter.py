@@ -124,6 +124,9 @@ def strip_xml_tags(text: str) -> str:
     # Then remove individual XML tags, keeping the content between them
     cleaned = _XML_TAG_PATTERN.sub('', cleaned)
 
+    # Remove stray ** (bold artifacts from LLM output)
+    cleaned = re.sub(r'\*\*', '', cleaned)
+
     # Clean up excessive blank lines left behind
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
 
