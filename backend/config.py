@@ -163,8 +163,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")  # e.g. postgresql://axel:pass@localhos
 PG_POOL_MIN = _get_int_env("PG_POOL_MIN", 2)
 PG_POOL_MAX = _get_int_env("PG_POOL_MAX", 10)
 
-# Context section budgets (chars). 30-turn working memory baseline.
-#   working: 30 turns × 2 msgs × ~2K chars ≈ 120K, with headroom
+# Context section budgets (chars). 20-turn working memory baseline.
+#   working: 20 turns × 2 msgs × ~2K chars ≈ 80K, with headroom
 #   long_term: ChromaDB top-20 × ~500 chars + metadata
 #   graphrag: entity/relation context, usually compact
 BUDGET_SYSTEM_PROMPT = _get_int_env("BUDGET_SYSTEM_PROMPT", 20_000)
