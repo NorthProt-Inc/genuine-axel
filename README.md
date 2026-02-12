@@ -56,9 +56,9 @@ graph TB
             Emotion["EmotionService"]
         end
 
-        subgraph LLM["LLM Router (Circuit Breaker)"]
-            Claude["Anthropic<br/>Claude Sonnet 4.5<br/>(Chat)"]
-            Gemini["Google<br/>Gemini 3 Flash<br/>(Utility)"]
+        subgraph LLM[]
+            Claude["Anthropic<br/>Claude Sonnet 4.5<br/>"]
+            Gemini["Google<br/>Gemini 3 Flash<br/>"]
         end
 
         subgraph Memory["6-Layer Memory System"]
